@@ -159,8 +159,9 @@ function App(){
   const [cats,  setCats]  = useState(Object.keys(DEFAULT_MENU));
   const [cat,   setCat]   = useState(Object.keys(DEFAULT_MENU)[0]);
   const [cart,  setCart]  = useState([]); // [{id, item, sel, qty}]
-  const [view,  setView]  = useState("menu"); // menu | cart | confirm | done
+  const [view,  setView]  = useState("pax"); // pax | menu | cart | confirm | done
   const [note,  setNote]  = useState("");
+  const [pax,   setPax]   = useState(1);
   const [sending, setSending] = useState(false);
   const [error,   setError]   = useState(null);
   const [expandedItem, setExpandedItem] = useState(null);
@@ -218,7 +219,7 @@ function App(){
     }));
     const total=cartTotal(cart);
     try{
-      await submitOrder({table_id:tableId,items,total:+total.toFixed(2),note:note.trim()||null,status:"pending"});
+      await submitOrder({table_id:tableId,items,total:+total.toFixed(2),note:note.trim()||null,status:"pending",pax});
       setView("done");
     }catch(e){
       setError("Could not send order. Please ask a staff member.");
@@ -234,7 +235,8 @@ function App(){
   return(
     <div style={{minHeight:"100dvh",background:K.bg,color:K.txt,fontFamily:"Georgia,'Times New Roman',serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"}}>
 
-      {view==="done" && <DoneView tableId={tableId} onNewOrder={()=>{setCart([]);setNote("");setView("menu");}}/>}
+      {view==="pax"  && <PaxSelectView tableId={tableId} onConfirm={(n)=>{setPax(n);setView("menu");}}/> }
+      {view==="done" && <DoneView tableId={tableId} onNewOrder={()=>{setCart([]);setNote("");setView("pax");}}/>}
       {view==="confirm" && (
         <ConfirmView cart={cart} total={total} tableId={tableId} note={note} setNote={setNote}
           sending={sending} error={error}
@@ -555,6 +557,83 @@ function NoTable(){
       <div style={{fontSize:48,marginBottom:16}}>🪑</div>
       <div style={{fontSize:18,fontWeight:"bold",color:K.txt,marginBottom:8}}>No Table Selected</div>
       <div style={{fontSize:13,color:K.dim,lineHeight:1.8}}>Please scan the QR code on your table to place an order.</div>
+    </div>
+  );
+}
+
+// ── PAX SELECT VIEW ──────────────────────────────────────
+function PaxSelectView({tableId, onConfirm}){
+  const [selected, setSelected] = useState(null);
+  const options = [1,2,3,4,5,6,7,8];
+
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+      {/* Header */}
+      <div style={{background:K.brown,padding:"24px 20px 20px",position:"relative",overflow:"hidden"}}>
+        <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,opacity:0.06,background:"repeating-linear-gradient(45deg,#fff 0,#fff 1px,transparent 0,transparent 50%)",backgroundSize:"10px 10px"}}/>
+        <div style={{position:"relative",textAlign:"center"}}>
+          <div style={{fontSize:9,color:"#d4b896",letterSpacing:3,marginBottom:4}}>WELCOME TO</div>
+          <div style={{fontSize:22,fontWeight:"bold",color:"#fff",letterSpacing:1}}>Hakka Kopitiam</div>
+          <div style={{fontSize:11,color:"#d4b896",marginTop:2}}>家的味道 · Taman Gembira</div>
+          <div style={{marginTop:14,background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"8px 20px",display:"inline-block"}}>
+            <span style={{fontSize:11,color:"#d4b896",letterSpacing:1}}>TABLE </span>
+            <span style={{fontSize:18,fontWeight:"bold",color:"#fff"}}>{tableId}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Pax selector */}
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 28px 48px"}}>
+        <div style={{fontSize:52,marginBottom:16}}>👥</div>
+        <div style={{fontSize:20,fontWeight:"bold",color:K.txt,marginBottom:6}}>How many are dining?</div>
+        <div style={{fontSize:13,color:K.dim,marginBottom:32,textAlign:"center"}}>Select the number of guests at your table</div>
+
+        {/* Number grid */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,width:"100%",maxWidth:320,marginBottom:36}}>
+          {options.map(n=>(
+            <button key={n} onClick={()=>setSelected(n)}
+              style={{
+                padding:"18px 0",
+                borderRadius:14,
+                border:`2px solid ${selected===n?K.gold:K.bdr}`,
+                background: selected===n ? K.gold : K.card,
+                color: selected===n ? "#fff" : K.txt,
+                fontSize:22,
+                fontWeight:"bold",
+                cursor:"pointer",
+                boxShadow: selected===n ? `0 4px 14px ${K.gold}55` : "0 1px 4px rgba(0,0,0,0.06)",
+                transition:"all 0.15s",
+              }}>
+              {n}
+            </button>
+          ))}
+        </div>
+
+        {/* 9+ option */}
+        <button onClick={()=>setSelected(9)}
+          style={{width:"100%",maxWidth:320,padding:"14px",borderRadius:14,border:`2px solid ${selected===9?K.gold:K.bdr}`,background:selected===9?K.gold:K.card,color:selected===9?"#fff":K.dim,fontSize:14,cursor:"pointer",marginBottom:32,transition:"all 0.15s"}}>
+          9 or more guests
+        </button>
+
+        <button
+          onClick={()=>{ if(selected) onConfirm(selected); }}
+          disabled={!selected}
+          style={{
+            width:"100%",maxWidth:320,
+            padding:"17px",
+            background: selected ? K.brown : K.bdr,
+            border:"none",
+            color: selected ? "#fff" : K.faint,
+            borderRadius:16,
+            cursor: selected ? "pointer" : "not-allowed",
+            fontSize:16,
+            fontWeight:"bold",
+            boxShadow: selected ? "0 4px 16px rgba(92,58,30,0.3)" : "none",
+            transition:"all 0.2s",
+          }}>
+          {selected ? `Continue with ${selected} guest${selected>1?"s":""} →` : "Select number of guests"}
+        </button>
+      </div>
     </div>
   );
 }
