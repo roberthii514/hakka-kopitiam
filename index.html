@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<title>Hakka Kopitiam POS</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+  body{background:#0e0c09;font-family:Georgia,'Times New Roman',serif;overscroll-behavior:none;}
+  input{font-family:Georgia,'Times New Roman',serif;}
+  button{font-family:Georgia,'Times New Roman',serif;}
+  ::-webkit-scrollbar{width:4px;}
+  ::-webkit-scrollbar-track{background:transparent;}
+  ::-webkit-scrollbar-thumb{background:#2c2519;border-radius:2px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+
+const { useState, useEffect } = React;
+
+// ── SUPABASE ──────────────────────────────────────────────
+const SUPA_URL = "https://qhhlvyluvjzsuycwakan.supabase.co";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaGx2eWx1dmp6c3V5Y3dha2FuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNzM3NzUsImV4cCI6MjA5MDk0OTc3NX0.pPk4PJ2UGwl1K0mUzYMhUbVM-rBP0yX_LDRrq71CGCA";
+const HDR = {"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY};
+const ANALYTICS_PASSWORD = "hakka2025";
+
+async function dbSave(payload) {
+  const r = await fetch(SUPA_URL+"/rest/v1/orders",{method:"POST",headers:{...HDR,"Prefer":"return=minimal"},body:JSON.stringify(payload)});
+  if(!r.ok) throw new Error("HTTP "+r.status+": "+await r.text());
+  return true;
+}
+async function dbFetch(fromISO) {
+  let url = SUPA_URL+"/rest/v1/orders?select=*&order=created_at.desc&limit=500";
+  if(fromISO) url += "&created_at=gte."+encodeURIComponent(fromISO);
+  const r = await fetch(url,{headers:HDR});
+  if(!r.ok) throw new Error("HTTP "+r.status+": "+await r.text());
+  return r.json();
+}
+
+// ── VARIATIONS ────────────────────────────────────────────
+const sz2  = (a,b)   => ({key:"size",label:"Size",   options:[{label:"Small",base:a,mod:0},{label:"Big",base:b,mod:0}]});
+const sz3  = (a,b,c) => ({key:"size",label:"Size",   options:[{label:"Small",base:a,mod:0},{label:"Big",base:b,mod:0},{label:"Takeaway",base:c,mod:0}]});
+const sz2b = (b,c)   => ({key:"size",label:"Size",   options:[{label:"Big",base:b,mod:0},{label:"Takeaway",base:c,mod:0}]});
+const VN = {key:"noodle",label:"Noodle",options:[{label:"Yellow Noodles",mod:0},{label:"Hor Fun",mod:0},{label:"Rice Vermicelli",mod:0},{label:"Wanton Noodles",mod:0},{label:"Lao Shu Fen",mod:0},{label:"Instant Noodles",mod:0},{label:"Handmade (+RM1)",mod:1}]};
+const VS = {key:"style",label:"Style",options:[{label:"Soup",mod:0},{label:"Dry",mod:0}]};
+const VT = {key:"temp", label:"Temp", options:[{label:"Hot",mod:0},{label:"Ice",mod:0}]};
+const VC = {key:"choice",label:"Choice",options:[{label:"With Rice",mod:0},{label:"With Noodles",mod:0}]};
+
+// ── MENU ──────────────────────────────────────────────────
+const MENU = {
+  "⭐ Specials":[
+    {id:"sp1",name:"Hakka Fried Pork Noodle",zh:"客家炸肉面",price:0,disp:"Ask staff",emoji:"🍜",tag:"★ SPECIAL",v:[]},
+    {id:"sp2",name:"Hokkien Meat Rolls",      zh:"福建卤肉卷",price:0,disp:"Ask staff",emoji:"🥢",tag:"★ SPECIAL",v:[]},
+  ],
+  "🍜 Noodles":[
+    {id:"n1",name:"Penang Prawn Noodles",       zh:"槟城虾面",    price:10,big:11,emoji:"🍜",tag:"❤️",v:[sz2(10,11),VS,VN]},
+    {id:"n2",name:"Fried Prawn Noodles",         zh:"炒虾面",      price:11,big:12,emoji:"🍜",tag:"❤️",v:[sz2(11,12),VN]},
+    {id:"n3",name:"Fish Paste Noodles",          zh:"家乡鱼滑粉",  price:10,big:11,emoji:"🍜",tag:"❤️",v:[sz2(10,11),VS,VN]},
+    {id:"n4",name:"Luncheon Meat & Egg Noodles", zh:"餐蛋面",      price:11,big:12,emoji:"🍜",v:[sz2(11,12),VS,VN]},
+    {id:"n5",name:"Wanton Noodles",              zh:"云吞面",      price:10,big:11,emoji:"🍜",v:[sz2(10,11),VS,VN]},
+    {id:"n6",name:"Penang White Curry Noodles",  zh:"槟城白加哩面",price:11,big:12,emoji:"🍛",v:[sz2(11,12),VN]},
+    {id:"n7",name:"Fried Rice",                  zh:"炒饭",        price:11,big:12,emoji:"🍚",v:[sz2(11,12)]},
+  ],
+  "📅 Daily":[
+    {id:"ds1",name:"Braised Pork",             zh:"卤猪肉",    price:15,emoji:"🥩",tag:"🔥 MON",v:[VC]},
+    {id:"ds2",name:"Curry Chicken",            zh:"咖喱鸡",    price:15,emoji:"🍗",tag:"TUE",   v:[VC]},
+    {id:"ds3",name:"Slow-Cooked Soup",         zh:"老火靓汤",  price:13,emoji:"🍲",tag:"WED",   v:[VC]},
+    {id:"ds4",name:"Pepper Pork Stomach Soup", zh:"胡椒猪肚汤",price:15,emoji:"🍲",tag:"THU",   v:[VC]},
+    {id:"ds5",name:"Braised Pork Trotter",     zh:"卤猪脚",    price:15,emoji:"🥩",tag:"🔥 FRI",v:[VC]},
+    {id:"ds6",name:"Fish Head Noodles",        zh:"鱼头米",    price:25,emoji:"🐟",tag:"SAT/SUN",v:[]},
+  ],
+  "🥟 Traditional":[
+    {id:"tr1",name:"Hakka Yong Tau Foo (min 4)",zh:"客家酿豆腐",    price:2.50,disp:"RM2.50/pc",emoji:"🫕",v:[]},
+    {id:"tr2",name:"Ipoh Red Sauce Chee Cheong Fun",zh:"怡保红酱猪肠粉",price:5.50,emoji:"🍱",v:[]},
+    {id:"tr3",name:"Fried Wantan (10 pcs)",    zh:"炸云吞",        price:9,   emoji:"🥟",v:[]},
+    {id:"tr4",name:"Fish Paste Soup",          zh:"鱼滑汤",        price:10,  emoji:"🍲",v:[]},
+  ],
+  "🍞 Toast":[
+    {id:"tb1",name:"Kaya & Butter Toast",             zh:"烤面包",          price:3.50, emoji:"🍞",v:[]},
+    {id:"tb2",name:"Garlic Bread",                    zh:"蒜蓉面包",        price:4.50, emoji:"🥖",v:[]},
+    {id:"tb3",name:"Croissant - Plain",               zh:"牛角包-原味",     price:7.00, emoji:"🥐",v:[]},
+    {id:"tb4",name:"Croissant - Kaya & Butter",       zh:"牛角包-咖椰牛油", price:9.00, emoji:"🥐",v:[]},
+    {id:"tb5",name:"Croissant - Luncheon Meat & Egg", zh:"牛角包-餐蛋",    price:11.00,emoji:"🥐",v:[]},
+    {id:"tb6",name:"Luncheon Meat & Egg Sandwich",    zh:"餐蛋面包",        price:9.00, emoji:"🥪",v:[]},
+    {id:"tb7",name:"Soft Boiled Kampung Egg",         zh:"菜园生熟蛋",      price:4.00, emoji:"🥚",v:[]},
+  ],
+  "☕ Drinks":[
+    {id:"d1", name:"Ipoh White Coffee O", zh:"怡保白咖啡O",price:2.80,emoji:"☕",v:[sz3(2.80,3.30,3.80),VT]},
+    {id:"d2", name:"Ipoh White Coffee",   zh:"怡保白咖啡", price:3.30,emoji:"☕",v:[sz3(3.30,3.80,4.30),VT]},
+    {id:"d3", name:"Teh O",              zh:"奶茶O",      price:2.80,emoji:"🍵",v:[sz3(2.80,3.30,3.80),VT]},
+    {id:"d4", name:"Teh",               zh:"奶茶",       price:3.30,emoji:"🍵",v:[sz3(3.30,3.80,4.30),VT]},
+    {id:"d5", name:"Hailam Teh O",      zh:"海南奶茶O",  price:2.80,emoji:"🍵",v:[sz3(2.80,3.30,3.80),VT]},
+    {id:"d6", name:"Hailam Teh",        zh:"海南奶茶",   price:3.30,emoji:"🍵",v:[sz3(3.30,3.80,4.30),VT]},
+    {id:"d7", name:"Nescafe O",         zh:"Nescafe O",  price:3.00,emoji:"☕",v:[sz3(3.00,3.50,4.00),VT]},
+    {id:"d8", name:"Nescafe",           zh:"Nescafe",    price:3.50,emoji:"☕",v:[sz3(3.50,4.00,4.50),VT]},
+    {id:"d9", name:"Milo",              zh:"美禄",       price:3.50,emoji:"🥛",v:[sz3(3.50,4.00,4.50),VT]},
+    {id:"d10",name:"Sour Plum Calamansi",zh:"金桔酸梅",  price:4.00,emoji:"🍋",v:[sz2b(4.00,4.50),VT]},
+    {id:"d11",name:"Honey Lemon",       zh:"蜂蜜柠檬",   price:4.00,emoji:"🍯",v:[sz2b(4.00,4.50),VT]},
+    {id:"d12",name:"Pumpkin Barley",    zh:"金瓜薏米水", price:3.50,emoji:"🎃",v:[sz2b(3.50,4.00),VT]},
+    {id:"d13",name:"Herbal Tea (2 pax)",zh:"六宝靓茶",   price:4.00,disp:"RM4.00 +RM1/pax",emoji:"🫖",v:[VT]},
+    {id:"d14",name:"Chinese Tea",       zh:"中国茶",     price:0.80,emoji:"🫖",v:[sz2b(0.80,1.00),VT]},
+    {id:"d15",name:"Drinking Water",    zh:"白开水",     price:0.50,emoji:"💧",v:[]},
+  ],
+  "➕ Add-ons":[
+    {id:"ao1",name:"Fried Egg",             zh:"荷包蛋",  price:1.50, emoji:"🍳",v:[]},
+    {id:"ao2",name:"Onion Fried Egg",       zh:"大葱煎蛋",price:8.00, big:15.00,emoji:"🍳",v:[sz2(8,15)]},
+    {id:"ao3",name:"Vegetables of the Day", zh:"时菜",    price:15.00,big:20.00,emoji:"🥬",v:[sz2(15,20)]},
+    {id:"ao4",name:"White Rice",            zh:"白饭",    price:1.50, big:2.00, emoji:"🍚",v:[sz2(1.5,2)]},
+  ],
+};
+const ALL_CATS = Object.keys(MENU);
+const TAX = 0.06;
+const TABLES = [
+  {id:"L1",label:"L1",type:"sq",   seats:2,zone:"left"},
+  {id:"L2",label:"L2",type:"rnd-M",seats:4,zone:"left"},
+  {id:"L3",label:"L3",type:"rnd-B",seats:6,zone:"left"},
+  {id:"L4",label:"L4",type:"rnd-S",seats:3,zone:"left"},
+  {id:"M1",label:"M1",type:"rnd-M",seats:4,zone:"mid"},
+  {id:"M2",label:"M2",type:"rnd-M",seats:4,zone:"mid"},
+  {id:"M3",label:"M3",type:"rnd-M",seats:4,zone:"mid"},
+  {id:"M4",label:"M4",type:"rnd-M",seats:4,zone:"mid"},
+  {id:"R1",label:"R1",type:"sq",   seats:2,zone:"right"},
+  {id:"R2",label:"R2",type:"sq",   seats:2,zone:"right"},
+  {id:"R3",label:"R3",type:"sq",   seats:2,zone:"right"},
+  {id:"R4",label:"R4",type:"sq",   seats:2,zone:"right"},
+  {id:"R5",label:"R5",type:"sq",   seats:2,zone:"right"},
+  {id:"R6",label:"R6",type:"sq",   seats:2,zone:"right"},
+  {id:"R7",label:"R7",type:"rnd-M",seats:4,zone:"right"},
+];
+const C = {
+  gold:"#c9a96e",bg:"#0e0c09",surf:"#161310",surfUp:"#1c1810",
+  bdr:"#2c2519",bdrHi:"#3d3020",
+  txt:"#ede0cc",dim:"#8a7a60",faint:"#3a3020",
+  green:"#4aaa78",red:"#cc5555",blue:"#5588cc",purple:"#9966cc",cream:"#f5f0e8",
+};
+
+// ── HELPERS ───────────────────────────────────────────────
+const hasV   = i => i.v && i.v.length > 0;
+const rm     = n => "RM"+(+(n||0)).toFixed(2);
+function defSel(item){const s={};(item.v||[]).forEach(vg=>{s[vg.key]=0;});return s;}
+function iPrice(item,sel){
+  let base=item.price||0;
+  (item.v||[]).forEach(vg=>{
+    const opt=vg.options[(sel&&sel[vg.key])||0];
+    if(!opt)return;
+    if(opt.base!==undefined)base=opt.base;else base+=opt.mod||0;
+  });
+  return base;
+}
+function iLabel(item,sel){
+  return(item.v||[]).map(vg=>{
+    const opt=vg.options[(sel&&sel[vg.key])||0];
+    return opt?opt.label.replace(/ \(\+RM\d+\)/,""):"";
+  }).filter(Boolean).join(" · ");
+}
+function sumOrder(ois){return(ois||[]).reduce((s,oi)=>s+iPrice(oi.item,oi.sel),0);}
+function billGroups(ois){
+  const simple=[],complex=[],map={};
+  (ois||[]).forEach(oi=>{
+    if(!hasV(oi.item)){
+      if(!map[oi.item.id]){map[oi.item.id]={oi,qty:0};simple.push(map[oi.item.id]);}
+      map[oi.item.id].qty++;
+    }else complex.push(oi);
+  });
+  return{simple,complex};
+}
+function rangeFrom(r){
+  if(r==="all")return null;
+  const d=new Date();
+  if(r==="today")d.setHours(0,0,0,0);
+  else if(r==="week")d.setDate(d.getDate()-7);
+  else if(r==="month")d.setDate(d.getDate()-30);
+  return d.toISOString();
+}
+
+// ── CHIP ──────────────────────────────────────────────────
+function Chip({table,status,pax,leader,total,isSource,combineMode,onPress}){
+  const dot=status==="occupied"?C.red:status==="grouped"?C.blue:C.green;
+  const bdr=isSource?C.gold:combineMode?C.blue+"66":status==="occupied"?"#5a1a1a":status==="grouped"?"#1a2a5a":C.bdr;
+  const bg=isSource?"#221e0a":status==="occupied"?"#1e0c0c":status==="grouped"?"#0c1628":C.surfUp;
+  const rnd=table.type!=="sq",big=table.type==="rnd-B",sml=table.type==="rnd-S";
+  const w=big?68:sml?50:rnd?58:52;
+  return(
+    <button onClick={onPress} style={{width:w,height:w,borderRadius:rnd?"50%":9,background:bg,border:`2px solid ${bdr}`,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",cursor:"pointer",position:"relative",gap:1,flexShrink:0,transition:"all 0.12s",boxShadow:isSource?`0 0 14px ${C.gold}66`:"none"}}>
+      <div style={{width:6,height:6,borderRadius:"50%",background:dot,boxShadow:`0 0 6px ${dot}`,marginBottom:1}}/>
+      <div style={{fontSize:big?12:11,fontWeight:"bold",color:C.txt,lineHeight:1}}>{table.label}</div>
+      <div style={{fontSize:9,color:C.dim,lineHeight:1}}>{table.seats}px</div>
+      {pax>0&&<div style={{fontSize:9,color:dot,lineHeight:1}}>👤{pax}</div>}
+      {leader&&total>0&&<div style={{position:"absolute",top:-7,right:-4,background:C.gold,color:"#0d0d0d",fontSize:8,fontWeight:"bold",padding:"2px 5px",borderRadius:8}}>{rm(total)}</div>}
+    </button>
+  );
+}
+
+// ── APP ───────────────────────────────────────────────────
+function App(){
+  const [groups,    setGroups]    = useState({});
+  const [tGroup,    setTGroup]    = useState({});
+  const [combMode,  setCombMode]  = useState(false);
+  const [combSrc,   setCombSrc]   = useState(null);
+  const [activeGid, setActiveGid] = useState(null);
+  const [view,      setView]      = useState("floor");
+  const [menuCat,   setMenuCat]   = useState(ALL_CATS[0]);
+  const [saving,    setSaving]    = useState(false);
+  const [toast,     setToast]     = useState(null);
+  const [saveErr,   setSaveErr]   = useState(null);
+
+  function showToast(msg,ok){setToast({msg,ok});setTimeout(()=>setToast(null),4000);}
+  const gid_   = tid => tGroup[tid]||tid;
+  const gdata_ = gid => groups[gid]||{tableIds:[gid],pax:0,ois:[]};
+  const gtbls_ = gid => groups[gid]?groups[gid].tableIds:[gid];
+  function tStatus(tid){
+    const gd=gdata_(gid_(tid));
+    if(gd.pax>0)return"occupied";
+    if(tGroup[tid]||groups[gid_(tid)])return"grouped";
+    return"available";
+  }
+  function startComb(){setCombMode(true);setCombSrc(null);}
+  function cancelComb(){setCombMode(false);setCombSrc(null);}
+  function onCombTap(tid){
+    if(!combSrc){setCombSrc(tid);return;}
+    if(combSrc===tid){setCombSrc(null);return;}
+    const sg=gid_(combSrc),dg=gid_(tid);
+    if(sg===dg){cancelComb();return;}
+    const nid="G"+Date.now();
+    const all=[...new Set([...gtbls_(sg),...gtbls_(dg)])];
+    const ois=[...(gdata_(sg).ois||[]),...(gdata_(dg).ois||[])];
+    setGroups(p=>{const n={...p};delete n[sg];delete n[dg];n[nid]={tableIds:all,pax:0,ois};return n;});
+    setTGroup(p=>{const n={...p};all.forEach(id=>{n[id]=nid;});return n;});
+    cancelComb();
+  }
+  function ungroup(gid){
+    const g=groups[gid];if(!g)return;
+    setGroups(p=>{const n={...p};delete n[gid];return n;});
+    setTGroup(p=>{const n={...p};g.tableIds.forEach(id=>delete n[id]);return n;});
+  }
+  function openTable(tid){
+    if(combMode){onCombTap(tid);return;}
+    const gid=gid_(tid),gd=gdata_(gid);
+    setActiveGid(gid);
+    if(gd.pax===0)setView("pax");
+    else{setView("order");setMenuCat(ALL_CATS[0]);}
+  }
+  function confirmPax(n){
+    setGroups(p=>{const ex=p[activeGid]||{tableIds:[activeGid],ois:[]};return{...p,[activeGid]:{...ex,pax:n}};});
+    setView("order");setMenuCat(ALL_CATS[0]);
+  }
+  function addItem(item){
+    const inst={id:Date.now()+"_"+Math.random(),item,sel:defSel(item)};
+    setGroups(p=>{const gd=p[activeGid]||{tableIds:[activeGid],pax:0,ois:[]};return{...p,[activeGid]:{...gd,ois:[...gd.ois,inst]}};});
+  }
+  function removeItem(itemId){
+    setGroups(p=>{
+      const gd=p[activeGid];if(!gd)return p;
+      const ois=[...gd.ois];
+      let found=-1;for(let i=ois.length-1;i>=0;i--){if(ois[i].item.id===itemId){found=i;break;}}
+      if(found===-1)return p;
+      ois.splice(found,1);
+      return{...p,[activeGid]:{...gd,ois}};
+    });
+  }
+  function updateVar(instId,vKey,oIdx){
+    setGroups(p=>{
+      const gd=p[activeGid];if(!gd)return p;
+      return{...p,[activeGid]:{...gd,ois:gd.ois.map(oi=>oi.id===instId?{...oi,sel:{...oi.sel,[vKey]:oIdx}}:oi)}};
+    });
+  }
+  async function closeTable(){
+    const gd=gdata_(activeGid);
+    const sub=sumOrder(gd.ois),tax=sub*TAX;
+    const items=(gd.ois||[]).map(oi=>({name:oi.item.name,zh:oi.item.zh,emoji:oi.item.emoji,price:iPrice(oi.item,oi.sel),custom:iLabel(oi.item,oi.sel)||null,cat:ALL_CATS.find(c=>MENU[c].some(m=>m.id===oi.item.id))||""}));
+    setSaving(true);setSaveErr(null);
+    try{
+      await dbSave({table_ids:gd.tableIds.join(", "),pax:gd.pax,items,subtotal:+sub.toFixed(2),tax:+tax.toFixed(2),total:+(sub+tax).toFixed(2)});
+      showToast("✓ Saved to database",true);
+    }catch(e){setSaveErr(e.message);showToast("⚠ Save failed",false);}
+    setSaving(false);
+    ungroup(activeGid);
+    setGroups(p=>{const n={...p};delete n[activeGid];return n;});
+    setActiveGid(null);setView("floor");
+  }
+
+  const agd=activeGid?gdata_(activeGid):null;
+  const agTbls=activeGid?gtbls_(activeGid):[];
+  const revenue=Object.values(groups).reduce((s,g)=>s+sumOrder(g.ois||[]),0);
+  const actCnt=Object.values(groups).filter(g=>g.pax>0).length;
+
+  function mkChip(tid){
+    const t=TABLES.find(x=>x.id===tid);if(!t)return null;
+    const gid=gid_(tid),gd=gdata_(gid);
+    const leader=!tGroup[tid]||groups[gid]?.tableIds[0]===tid;
+    return <Chip key={tid} table={t} status={tStatus(tid)} pax={gd.pax} leader={leader} total={sumOrder(gd.ois||[])} isSource={combSrc===tid} combineMode={combMode} onPress={()=>openTable(tid)}/>;
+  }
+  const L=TABLES.filter(t=>t.zone==="left"),M=TABLES.filter(t=>t.zone==="mid"),R=TABLES.filter(t=>t.zone==="right");
+
+  return(
+    <div style={{minHeight:"100dvh",background:C.bg,color:C.txt,fontFamily:"Georgia,'Times New Roman',serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"}}>
+      {toast&&<div style={{position:"fixed",top:0,left:"50%",transform:"translateX(-50%)",zIndex:9999,maxWidth:480,width:"100%",background:toast.ok?"#0d2a1a":"#2a0d0d",borderBottom:`2px solid ${toast.ok?C.green:C.red}`,color:toast.ok?C.green:C.red,padding:"11px 20px",textAlign:"center",fontSize:13,fontWeight:"bold"}}>{toast.msg}</div>}
+
+      {view==="floor"&&(
+        <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+          <div style={{background:C.surf,borderBottom:`1px solid ${C.bdr}`,padding:"14px 18px 12px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+              <div>
+                <div style={{fontSize:17,fontWeight:"bold",letterSpacing:2,color:C.gold}}>HAKKA KOPITIAM</div>
+                <div style={{fontSize:10,color:C.dim}}>家的味道 · Taman Gembira, KL</div>
+              </div>
+              <button onClick={()=>setView("analytics_login")} style={{background:C.purple+"22",border:`1px solid ${C.purple}66`,color:C.purple,padding:"7px 13px",borderRadius:9,cursor:"pointer",fontSize:12}}>📊 Analytics</button>
+            </div>
+            <div style={{display:"flex",gap:8,marginTop:12}}>
+              {[{l:"Tables",v:TABLES.length,c:C.dim},{l:"Active",v:actCnt,c:C.red},{l:"Session",v:rm(revenue),c:C.green}].map(s=>(
+                <div key={s.l} style={{flex:1,background:C.surfUp,border:`1px solid ${C.bdr}`,borderRadius:8,padding:"8px 0",textAlign:"center"}}>
+                  <div style={{fontSize:15,fontWeight:"bold",color:s.c}}>{s.v}</div>
+                  <div style={{fontSize:9,color:C.faint,letterSpacing:1}}>{s.l}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {saveErr&&(
+            <div style={{background:"#2a0a0a",border:`1px solid ${C.red}`,margin:"8px 16px",borderRadius:10,padding:"10px 14px"}}>
+              <div style={{fontSize:12,color:C.red,fontWeight:"bold",marginBottom:4}}>⚠ Database Save Error</div>
+              <div style={{fontSize:11,color:"#cc8888",wordBreak:"break-all",marginBottom:8}}>{saveErr}</div>
+              <div style={{fontSize:11,color:C.dim,lineHeight:1.6}}>Fix: Supabase → Table Editor → orders → disable RLS</div>
+              <button onClick={()=>setSaveErr(null)} style={{marginTop:8,background:"none",border:`1px solid ${C.red}`,color:C.red,padding:"4px 10px",borderRadius:6,cursor:"pointer",fontSize:11}}>Dismiss</button>
+            </div>
+          )}
+
+          {combMode?(
+            <div style={{background:"#0e1828",borderBottom:`1.5px solid ${C.blue}`,padding:"11px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div>
+                <div style={{fontSize:13,color:C.blue,fontWeight:"bold"}}>{!combSrc?"① Tap first table":`Moving ${combSrc} → tap destination`}</div>
+                <div style={{fontSize:11,color:"#4a6a9a",marginTop:2}}>{!combSrc?"Select a table":"Tap any table to merge"}</div>
+              </div>
+              <button onClick={cancelComb} style={{background:"none",border:`1px solid ${C.blue}`,color:C.blue,padding:"6px 14px",borderRadius:8,cursor:"pointer",fontSize:13}}>Cancel</button>
+            </div>
+          ):(
+            <div style={{padding:"12px 18px 0"}}>
+              <button onClick={startComb} style={{width:"100%",padding:"12px",background:C.surfUp,border:`1.5px dashed ${C.bdrHi}`,borderRadius:12,color:C.dim,fontSize:13,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+                <span style={{fontSize:16}}>⛓</span> COMBINE TABLES
+              </button>
+            </div>
+          )}
+
+          <div style={{padding:"9px 18px 4px",display:"flex",gap:16}}>
+            {[{c:C.green,l:"Available"},{c:C.red,l:"Occupied"},{c:C.blue,l:"Grouped"}].map(x=>(
+              <div key={x.l} style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:C.dim}}>
+                <div style={{width:7,height:7,borderRadius:"50%",background:x.c,boxShadow:`0 0 5px ${x.c}`}}/>{x.l}
+              </div>
+            ))}
+          </div>
+
+          <div style={{flex:1,overflowY:"auto",padding:"6px 14px 24px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <div style={{flex:1,height:1,background:C.bdr}}/>
+              <div style={{fontSize:10,color:C.dim,letterSpacing:2}}>🚪 ENTRANCE</div>
+              <div style={{flex:1,height:1,background:C.bdr}}/>
+            </div>
+            <div style={{border:`1.5px solid ${C.bdrHi}`,borderRadius:14,background:"#111009",padding:"12px 8px",display:"flex",alignItems:"stretch",minHeight:480}}>
+              <div style={{width:80,borderRight:`1px solid ${C.bdr}`,display:"flex",flexDirection:"column",alignItems:"center",gap:12,padding:"4px 0"}}>
+                <div style={{fontSize:8,color:C.faint,letterSpacing:2,marginBottom:4}}>LEFT</div>
+                {L.map(t=>mkChip(t.id))}
+              </div>
+              <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"space-evenly",padding:"20px 4px",gap:16}}>
+                {M.map(t=>mkChip(t.id))}
+              </div>
+              <div style={{width:80,borderLeft:`1px solid ${C.bdr}`,display:"flex",flexDirection:"column",alignItems:"center",gap:10,padding:"4px 0"}}>
+                <div style={{fontSize:8,color:C.faint,letterSpacing:2,marginBottom:4}}>RIGHT</div>
+                {R.map(t=>mkChip(t.id))}
+              </div>
+            </div>
+            <div style={{marginTop:10,border:`1.5px solid ${C.bdrHi}`,borderRadius:10,background:"#0f0d08",padding:"10px 16px",display:"flex",alignItems:"center",justifyContent:"center",gap:10}}>
+              <div style={{flex:1,height:2,background:C.bdrHi,borderRadius:2}}/>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:16}}>☕</div>
+                <div style={{fontSize:10,color:C.dim,letterSpacing:2,marginTop:2}}>BACK COUNTER</div>
+                <div style={{fontSize:9,color:C.faint}}>no seating</div>
+              </div>
+              <div style={{flex:1,height:2,background:C.bdrHi,borderRadius:2}}/>
+            </div>
+            {actCnt>0&&(
+              <div style={{marginTop:16}}>
+                <div style={{fontSize:10,color:C.dim,letterSpacing:2,marginBottom:10}}>ACTIVE SESSIONS</div>
+                <div style={{display:"flex",flexDirection:"column",gap:8}}>
+                  {Object.entries(groups).filter(([,g])=>g.pax>0).map(([gid,gd])=>(
+                    <button key={gid} onClick={()=>{setActiveGid(gid);setView("order");setMenuCat(ALL_CATS[0]);}} style={{background:C.surfUp,border:`1px solid ${C.bdrHi}`,borderRadius:12,padding:"13px 16px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",textAlign:"left"}}>
+                      <div>
+                        <div style={{fontSize:14,fontWeight:"bold",color:C.gold}}>{gd.tableIds.join(" + ")}</div>
+                        <div style={{fontSize:11,color:C.dim,marginTop:2}}>👤 {gd.pax} guests · {(gd.ois||[]).length} items</div>
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:16,fontWeight:"bold",color:C.green}}>{rm(sumOrder(gd.ois||[]))}</div>
+                        <div style={{fontSize:10,color:C.dim}}>+ 6% SST</div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {view==="pax"&&<PaxView groupTables={agTbls} onConfirm={confirmPax} onBack={()=>{setActiveGid(null);setView("floor");}}/>}
+      {view==="order"&&agd&&<OrderView groupTables={agTbls} gd={agd} cat={menuCat} setCat={setMenuCat} addItem={addItem} removeItem={removeItem} updateVar={updateVar} onBill={()=>setView("total")} onBack={()=>setView("floor")}/>}
+      {view==="total"&&agd&&<BillView groupTables={agTbls} gd={agd} saving={saving} onBack={()=>setView("order")} onClose={closeTable}/>}
+      {view==="analytics_login"&&<AnalyticsLogin onSuccess={()=>setView("analytics")} onBack={()=>setView("floor")}/>}
+      {view==="analytics"&&<AnalyticsView onBack={()=>setView("floor")}/>}
+    </div>
+  );
+}
+
+// ── PAX ───────────────────────────────────────────────────
+function PaxView({groupTables,onConfirm,onBack}){
+  const [val,setVal]=useState("");
+  const tap=n=>setVal(v=>v.length>=2?v:(v+n).replace(/^0+/,"")||"0");
+  const del=()=>setVal(v=>v.slice(0,-1));
+  const go=()=>{const n=parseInt(val);if(n>0)onConfirm(n);};
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+      <div style={{background:C.surf,borderBottom:`1px solid ${C.bdr}`,padding:"13px 18px",display:"flex",alignItems:"center",gap:12}}>
+        <button onClick={onBack} style={{background:"none",border:`1px solid ${C.bdr}`,color:C.dim,padding:"7px 14px",borderRadius:9,cursor:"pointer",fontSize:14}}>←</button>
+        <div>
+          <div style={{fontWeight:"bold",color:C.gold,fontSize:16}}>{groupTables.join(" + ")}</div>
+          <div style={{fontSize:11,color:C.dim}}>How many guests?</div>
+        </div>
+      </div>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"20px 28px 40px"}}>
+        <div style={{fontSize:48,marginBottom:8}}>👥</div>
+        <div style={{fontSize:12,color:C.dim,letterSpacing:2,marginBottom:20}}>HOW MANY GUESTS?</div>
+        <div style={{width:"100%",maxWidth:290,background:C.surfUp,border:`2px solid ${val?C.gold:C.bdr}`,borderRadius:18,padding:"20px 16px",textAlign:"center",marginBottom:22}}>
+          <div style={{fontSize:54,fontWeight:"bold",color:val?C.txt:C.faint,minHeight:66,letterSpacing:6}}>{val||"—"}</div>
+          <div style={{fontSize:12,color:C.dim}}>guests</div>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,width:"100%",maxWidth:290}}>
+          {[1,2,3,4,5,6,7,8,9,"⌫","0","✓"].map((k,i)=>{
+            const isC=k==="✓",isD=k==="⌫",dis=isC&&(!val||val==="0");
+            return(<button key={i} onClick={()=>isC?go():isD?del():tap(String(k))} disabled={dis}
+              style={{padding:"18px 0",borderRadius:13,border:isC?"none":`1px solid ${C.bdr}`,background:isC?(dis?C.bdr:C.gold):C.surfUp,color:isC?(dis?C.faint:"#0d0d0d"):isD?C.dim:C.txt,fontSize:isC?20:22,fontWeight:"bold",cursor:dis?"not-allowed":"pointer"}}>
+              {k}</button>);
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── ORDER ─────────────────────────────────────────────────
+function OrderView({groupTables,gd,cat,setCat,addItem,removeItem,updateVar,onBill,onBack}){
+  const ois=gd.ois||[];
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+      <div style={{background:C.surf,borderBottom:`1px solid ${C.bdr}`,padding:"12px 16px",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <button onClick={onBack} style={{background:"none",border:`1px solid ${C.bdr}`,color:C.dim,padding:"7px 12px",borderRadius:9,cursor:"pointer",fontSize:13}}>←</button>
+            <div>
+              <div style={{fontWeight:"bold",color:C.gold,fontSize:15}}>{groupTables.join(" + ")}</div>
+              <div style={{fontSize:11,color:C.dim}}>👤 {gd.pax} guests</div>
+            </div>
+          </div>
+          <button onClick={onBill} style={{background:C.gold,border:"none",color:"#0d0d0d",padding:"10px 16px",borderRadius:11,cursor:"pointer",fontWeight:"bold",fontSize:13,display:"flex",flexDirection:"column",alignItems:"center",lineHeight:1.3}}>
+            <span style={{fontSize:10,letterSpacing:1}}>VIEW BILL</span>
+            <span style={{fontSize:14}}>{ois.length>0?`${ois.length} item${ois.length>1?"s":""}`:"→"}</span>
+          </button>
+        </div>
+        <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
+          {ALL_CATS.map(c=>(
+            <button key={c} onClick={()=>setCat(c)} style={{flexShrink:0,padding:"6px 12px",borderRadius:20,border:`1px solid ${cat===c?C.gold:C.bdr}`,background:cat===c?C.gold:"none",color:cat===c?"#0d0d0d":C.dim,fontSize:11,cursor:"pointer",fontWeight:cat===c?"bold":"normal",whiteSpace:"nowrap"}}>
+              {c}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div style={{flex:1,overflowY:"auto",paddingBottom:24}}>
+        {cat==="🍜 Noodles"&&<div style={{margin:"10px 16px 4px",background:"#1a1a0e",border:`1px solid ${C.bdrHi}`,borderRadius:9,padding:"8px 13px",fontSize:11,color:C.dim,lineHeight:1.7}}>🍜 <strong style={{color:C.gold}}>Noodle choices:</strong> Yellow · Hor Fun · Rice Vermicelli · Wanton · Lao Shu Fen · Instant · <span style={{color:"#7a9a50"}}>Handmade +RM1</span></div>}
+        {cat==="📅 Daily"&&<div style={{margin:"10px 16px 4px",background:"#1a1a0e",border:`1px solid ${C.bdrHi}`,borderRadius:9,padding:"8px 13px",fontSize:11,color:C.dim}}>🍚 Choice of <strong style={{color:C.gold}}>Rice or Noodles</strong> included</div>}
+        {MENU[cat].map(item=>{
+          const insts=ois.filter(o=>o.item.id===item.id),qty=insts.length,simple=!hasV(item);
+          const priceStr=item.disp||(item.big?`${rm(item.price)} – ${rm(item.big)}`:rm(item.price));
+          return(
+            <div key={item.id}>
+              <div style={{display:"flex",alignItems:"center",padding:"12px 16px",borderBottom:`1px solid ${C.bdr}`,background:qty>0?"#0c1a10":C.bg,gap:10}}>
+                <div style={{fontSize:22,width:32,textAlign:"center",flexShrink:0}}>{item.emoji}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <span style={{fontSize:13,color:C.txt,fontWeight:qty>0?"bold":"normal"}}>{item.name}</span>
+                    {item.tag&&<span style={{fontSize:9,padding:"1px 5px",borderRadius:5,fontWeight:"bold",color:item.tag.includes("❤️")?"#e06080":item.tag.includes("★")?C.gold:"#80a0e0",background:item.tag.includes("❤️")?"#2a1020":item.tag.includes("★")?"#2a1a05":"#1a2030"}}>{item.tag}</span>}
+                  </div>
+                  <div style={{fontSize:10,color:C.dim,marginTop:1}}>{item.zh}</div>
+                  <div style={{fontSize:12,color:C.gold,marginTop:2}}>{priceStr}</div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                  <button onClick={()=>removeItem(item.id)} style={{width:30,height:30,borderRadius:"50%",border:`1px solid ${C.bdr}`,background:C.surfUp,color:C.txt,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                  <span style={{fontSize:15,fontWeight:"bold",color:qty>0?C.green:C.faint,minWidth:16,textAlign:"center"}}>{qty}</span>
+                  <button onClick={()=>addItem(item)} style={{width:30,height:30,borderRadius:"50%",border:"none",background:C.gold,color:"#0d0d0d",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold"}}>+</button>
+                </div>
+              </div>
+              {!simple&&insts.map((inst,iIdx)=>(
+                <div key={inst.id} style={{background:"#0e1a11",borderBottom:`1px solid ${C.bdr}`,padding:"8px 16px 10px 60px"}}>
+                  <div style={{fontSize:10,color:C.dim,marginBottom:6}}>#{iIdx+1} · <span style={{color:C.green}}>{rm(iPrice(inst.item,inst.sel))}</span>{iLabel(inst.item,inst.sel)&&<span style={{color:C.faint}}> · {iLabel(inst.item,inst.sel)}</span>}</div>
+                  <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                    {(item.v||[]).map(vg=>(
+                      <div key={vg.key} style={{display:"flex",alignItems:"center",gap:8}}>
+                        <div style={{fontSize:10,color:C.dim,minWidth:52,flexShrink:0}}>{vg.label}</div>
+                        <div style={{display:"flex",gap:5,flexWrap:"wrap",flex:1}}>
+                          {vg.options.map((opt,oIdx)=>{
+                            const sel=(inst.sel[vg.key]||0)===oIdx;
+                            return(<button key={oIdx} onClick={()=>updateVar(inst.id,vg.key,oIdx)} style={{padding:"4px 9px",borderRadius:12,border:`1px solid ${sel?C.gold:C.bdr}`,background:sel?"#2a2010":"none",color:sel?C.gold:C.dim,fontSize:10,cursor:"pointer",whiteSpace:"nowrap",transition:"all 0.1s"}}>{opt.label}</button>);
+                          })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── BILL ──────────────────────────────────────────────────
+function BillView({groupTables,gd,saving,onBack,onClose}){
+  const ois=gd.ois||[],sub=sumOrder(ois),tax=sub*TAX,total=sub+tax;
+  const{simple,complex}=billGroups(ois);
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+      <div style={{background:C.surf,borderBottom:`1px solid ${C.bdr}`,padding:"13px 18px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+        <button onClick={onBack} style={{background:"none",border:`1px solid ${C.bdr}`,color:C.dim,padding:"7px 12px",borderRadius:9,cursor:"pointer",fontSize:13}}>← Menu</button>
+        <div>
+          <div style={{fontWeight:"bold",color:C.gold,fontSize:15}}>{groupTables.join(" + ")} · Bill</div>
+          <div style={{fontSize:11,color:C.dim}}>👤 {gd.pax} guests</div>
+        </div>
+      </div>
+      <div style={{flex:1,overflowY:"auto",padding:"20px 18px"}}>
+        <div style={{background:C.cream,borderRadius:4,padding:"26px 20px",color:"#1a1610",fontFamily:"'Courier New',monospace",boxShadow:"0 10px 40px rgba(0,0,0,0.7)"}}>
+          <div style={{textAlign:"center",marginBottom:14}}>
+            <div style={{fontSize:22}}>☕</div>
+            <div style={{fontSize:15,fontWeight:"bold",letterSpacing:2,marginTop:4}}>HAKKA KOPITIAM</div>
+            <div style={{fontSize:11,color:"#6a5a40",letterSpacing:1}}>家的味道</div>
+            <div style={{fontSize:10,color:"#8a7a60",marginTop:2}}>3, Jalan 2/128, Taman Gembira, KL</div>
+            <div style={{borderTop:"1px dashed #c0a87a",margin:"12px 0"}}/>
+            <div style={{fontSize:11,color:"#7a6a50"}}>{new Date().toLocaleDateString("en-MY",{weekday:"short",month:"short",day:"numeric",year:"numeric"})}</div>
+            <div style={{fontSize:11,color:"#7a6a50"}}>{new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
+            <div style={{fontSize:13,fontWeight:"bold",marginTop:5}}>Table: {groupTables.join(" + ")} · Pax: {gd.pax}</div>
+          </div>
+          <div style={{borderTop:"1px dashed #c0a87a",marginBottom:12}}/>
+          {ois.length===0&&<div style={{textAlign:"center",color:"#9a8a70",padding:"20px 0",fontSize:13}}>No items ordered</div>}
+          {simple.map(({oi,qty})=>(
+            <div key={oi.item.id} style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:7,alignItems:"baseline"}}>
+              <span>{oi.item.emoji} {oi.item.name} <span style={{color:"#9a8a70"}}>×{qty}</span></span>
+              <span style={{fontWeight:"bold",marginLeft:8}}>{rm(iPrice(oi.item,oi.sel)*qty)}</span>
+            </div>
+          ))}
+          {complex.length>0&&simple.length>0&&<div style={{borderTop:"1px dotted #d0c0a0",margin:"10px 0"}}/>}
+          {complex.map(oi=>{
+            const lbl=iLabel(oi.item,oi.sel);
+            return(
+              <div key={oi.id} style={{marginBottom:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:13,alignItems:"baseline"}}>
+                  <span style={{fontWeight:"bold"}}>{oi.item.emoji} {oi.item.name}</span>
+                  <span style={{fontWeight:"bold",marginLeft:8}}>{rm(iPrice(oi.item,oi.sel))}</span>
+                </div>
+                {lbl&&<div style={{fontSize:11,color:"#8a7a60",marginTop:1,paddingLeft:4}}>↳ {lbl}</div>}
+              </div>
+            );
+          })}
+          <div style={{borderTop:"1px dashed #c0a87a",margin:"12px 0"}}/>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:5}}><span>Subtotal</span><span>{rm(sub)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:12,color:"#7a6a50"}}><span>SST 6%</span><span>{rm(tax)}</span></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:20,fontWeight:"bold",borderTop:"2px solid #1a1610",paddingTop:10,marginBottom:14}}><span>TOTAL</span><span>{rm(total)}</span></div>
+          {gd.pax>1&&sub>0&&(
+            <div style={{background:"#ede5d0",borderRadius:9,padding:"10px 14px",textAlign:"center",marginBottom:14}}>
+              <div style={{fontSize:10,color:"#7a6a50",letterSpacing:1,marginBottom:2}}>SPLIT ÷ {gd.pax} PEOPLE</div>
+              <div style={{fontSize:19,fontWeight:"bold"}}>{rm(total/gd.pax)} <span style={{fontSize:12,fontWeight:"normal",color:"#7a6a50"}}>each</span></div>
+            </div>
+          )}
+          <div style={{textAlign:"center",fontSize:10,color:"#9a8a70",lineHeight:2}}>Price subject to 6% SST<br/>Thank you · 谢谢光临 ♥</div>
+        </div>
+      </div>
+      <div style={{padding:"14px 18px 32px",background:C.surf,borderTop:`1px solid ${C.bdr}`,display:"flex",gap:10,flexShrink:0}}>
+        <button onClick={onBack} style={{flex:1,padding:"15px",background:"none",border:`1px solid ${C.bdr}`,color:C.dim,borderRadius:13,cursor:"pointer",fontSize:14}}>← Edit</button>
+        <button onClick={onClose} disabled={sub===0||saving} style={{flex:2,padding:"15px",background:sub>0&&!saving?C.green:C.bdr,border:"none",color:sub>0&&!saving?"#fff":C.faint,borderRadius:13,cursor:sub>0&&!saving?"pointer":"not-allowed",fontSize:14,fontWeight:"bold"}}>
+          {saving?"Saving…":"✓ PAID · CLEAR TABLE"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── ANALYTICS LOGIN ───────────────────────────────────────
+function AnalyticsLogin({onSuccess,onBack}){
+  const [pw,setPw]=useState(""),[show,setShow]=useState(false),[err,setErr]=useState(false);
+  function attempt(){
+    if(pw===ANALYTICS_PASSWORD)onSuccess();
+    else{setErr(true);setPw("");setTimeout(()=>setErr(false),1500);}
+  }
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column"}}>
+      <div style={{background:C.surf,borderBottom:`1px solid ${C.bdr}`,padding:"13px 18px",display:"flex",alignItems:"center",gap:12}}>
+        <button onClick={onBack} style={{background:"none",border:`1px solid ${C.bdr}`,color:C.dim,padding:"7px 14px",borderRadius:9,cursor:"pointer",fontSize:14}}>←</button>
+        <div style={{fontWeight:"bold",color:C.purple,fontSize:15}}>📊 Analytics Access</div>
+      </div>
+      <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"32px 32px 60px"}}>
+        <div style={{fontSize:48,marginBottom:16}}>🔒</div>
+        <div style={{fontSize:16,fontWeight:"bold",color:C.txt,marginBottom:6}}>Manager Access Only</div>
+        <div style={{fontSize:12,color:C.dim,marginBottom:32,textAlign:"center"}}>Enter password to view business data</div>
+        <div style={{width:"100%",maxWidth:300}}>
+          <div style={{position:"relative",marginBottom:16}}>
+            <input type={show?"text":"password"} value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&attempt()} placeholder="Enter password" autoComplete="off"
+              style={{width:"100%",padding:"14px 48px 14px 16px",background:C.surfUp,border:`2px solid ${err?C.red:pw?C.purple:C.bdr}`,borderRadius:12,color:C.txt,fontSize:16,outline:"none",boxSizing:"border-box",transition:"border-color 0.2s",letterSpacing:pw&&!show?"4px":"normal"}}/>
+            <button onClick={()=>setShow(s=>!s)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:16,padding:4}}>{show?"🙈":"👁"}</button>
+          </div>
+          {err&&<div style={{background:"#2a0d0d",border:`1px solid ${C.red}`,borderRadius:8,padding:"10px 14px",textAlign:"center",fontSize:13,color:C.red,marginBottom:14}}>❌ Incorrect password</div>}
+          <button onClick={attempt} style={{width:"100%",padding:"15px",background:C.purple,border:"none",color:"#fff",borderRadius:12,cursor:"pointer",fontSize:15,fontWeight:"bold",letterSpacing:1}}>UNLOCK ANALYTICS</button>
+        </div>
+        <div style={{marginTop:24,fontSize:11,color:C.faint,textAlign:"center"}}>Default password: <span style={{color:C.dim}}>hakka2025</span></div>
+      </div>
+    </div>
+  );
+}
+
+// ── ANALYTICS ─────────────────────────────────────────────
+function AnalyticsView({onBack}){
+  const [orders,setOrders]=useState([]),[loading,setLoading]=useState(true),[error,setError]=useState(null);
+  const [range,setRange]=useState("today"),[tab,setTab]=useState("summary");
+  useEffect(()=>{load();},[range]);
+  async function load(){
+    setLoading(true);setError(null);
+    try{const data=await dbFetch(rangeFrom(range));setOrders(Array.isArray(data)?data:[]);}
+    catch(e){setError(e.message);setOrders([]);}
+    setLoading(false);
+  }
+  const totalRev=orders.reduce((s,o)=>s+(o.total||0),0);
+  const totalPax=orders.reduce((s,o)=>s+(o.pax||0),0);
+  const totalOrds=orders.length,avgBill=totalOrds>0?totalRev/totalOrds:0,avgPax=totalOrds>0?totalPax/totalOrds:0;
+  const itemMap={};
+  orders.forEach(o=>(o.items||[]).forEach(it=>{
+    if(!itemMap[it.name])itemMap[it.name]={name:it.name,emoji:it.emoji||"",cat:it.cat||"",qty:0,rev:0};
+    itemMap[it.name].qty++;itemMap[it.name].rev+=it.price||0;
+  }));
+  const topItems=Object.values(itemMap).sort((a,b)=>b.qty-a.qty).slice(0,10);
+  const tMap={};
+  orders.forEach(o=>{const k=o.table_ids||"?";if(!tMap[k])tMap[k]={table:k,visits:0,pax:0,rev:0};tMap[k].visits++;tMap[k].pax+=o.pax||0;tMap[k].rev+=o.total||0;});
+  const tStats=Object.values(tMap).sort((a,b)=>b.rev-a.rev);
+  const RANGES=[{k:"today",l:"Today"},{k:"week",l:"7 Days"},{k:"month",l:"30 Days"},{k:"all",l:"All Time"}];
+  const TABS=[{k:"summary",l:"Recent"},{k:"items",l:"Top Items"},{k:"tables",l:"By Table"}];
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+      <div style={{background:C.surf,borderBottom:`1px solid ${C.bdr}`,padding:"13px 18px",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <button onClick={onBack} style={{background:"none",border:`1px solid ${C.bdr}`,color:C.dim,padding:"7px 12px",borderRadius:9,cursor:"pointer",fontSize:13}}>←</button>
+            <div style={{fontWeight:"bold",color:C.purple,fontSize:15}}>📊 Analytics</div>
+          </div>
+          <button onClick={load} style={{background:"none",border:`1px solid ${C.bdr}`,color:C.dim,padding:"6px 12px",borderRadius:8,cursor:"pointer",fontSize:12}}>↻ Refresh</button>
+        </div>
+        <div style={{display:"flex",gap:6}}>
+          {RANGES.map(r=>(
+            <button key={r.k} onClick={()=>setRange(r.k)} style={{flex:1,padding:"7px 0",borderRadius:9,border:`1px solid ${range===r.k?C.purple:C.bdr}`,background:range===r.k?C.purple+"33":"none",color:range===r.k?C.purple:C.dim,fontSize:11,cursor:"pointer",fontWeight:range===r.k?"bold":"normal"}}>{r.l}</button>
+          ))}
+        </div>
+      </div>
+      {loading?(
+        <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:12}}>
+          <div style={{fontSize:30}}>📊</div><div style={{color:C.dim,fontSize:13}}>Loading…</div>
+        </div>
+      ):error?(
+        <div style={{flex:1,padding:"24px 20px"}}>
+          <div style={{background:"#2a0a0a",border:`1px solid ${C.red}`,borderRadius:12,padding:"16px"}}>
+            <div style={{fontSize:14,color:C.red,fontWeight:"bold",marginBottom:8}}>⚠ Could not load data</div>
+            <div style={{fontSize:12,color:"#cc8888",wordBreak:"break-all",marginBottom:12}}>{error}</div>
+            <div style={{fontSize:12,color:C.dim,lineHeight:1.8,marginBottom:12}}>
+              To fix RLS issue:<br/>
+              1. Supabase → Table Editor → orders<br/>
+              2. Click <strong style={{color:C.gold}}>RLS Enabled</strong> → <strong style={{color:C.gold}}>Disable RLS</strong>
+            </div>
+            <button onClick={load} style={{background:C.purple,border:"none",color:"#fff",padding:"10px 20px",borderRadius:9,cursor:"pointer",fontSize:13,fontWeight:"bold"}}>Try Again</button>
+          </div>
+        </div>
+      ):(
+        <div style={{flex:1,overflowY:"auto",padding:"14px 16px 32px"}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:12}}>
+            {[{l:"Revenue",v:rm(totalRev),c:C.green,i:"💰"},{l:"Orders",v:totalOrds,c:C.gold,i:"🧾"},{l:"Total Pax",v:totalPax,c:C.blue,i:"👥"},{l:"Avg Bill",v:rm(avgBill),c:C.purple,i:"📈"}].map(s=>(
+              <div key={s.l} style={{background:C.surfUp,border:`1px solid ${C.bdr}`,borderRadius:12,padding:"14px"}}>
+                <div style={{fontSize:20,marginBottom:4}}>{s.i}</div>
+                <div style={{fontSize:18,fontWeight:"bold",color:s.c}}>{s.v}</div>
+                <div style={{fontSize:10,color:C.dim,marginTop:2}}>{s.l}</div>
+              </div>
+            ))}
+          </div>
+          {totalOrds>0&&<div style={{background:C.surfUp,border:`1px solid ${C.bdr}`,borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center"}}><div style={{fontSize:12,color:C.dim}}>Avg guests per visit</div><div style={{fontSize:18,fontWeight:"bold"}}>{avgPax.toFixed(1)} pax</div></div>}
+          <div style={{display:"flex",gap:6,marginBottom:14}}>
+            {TABS.map(t=>(
+              <button key={t.k} onClick={()=>setTab(t.k)} style={{flex:1,padding:"8px 0",borderRadius:9,border:`1px solid ${tab===t.k?C.gold:C.bdr}`,background:tab===t.k?C.gold+"22":"none",color:tab===t.k?C.gold:C.dim,fontSize:12,cursor:"pointer",fontWeight:tab===t.k?"bold":"normal"}}>{t.l}</button>
+            ))}
+          </div>
+          {tab==="summary"&&(
+            <div>
+              {orders.length===0&&<div style={{color:C.faint,fontSize:13,textAlign:"center",padding:"30px 0"}}>No orders yet for this period</div>}
+              {orders.slice(0,20).map(o=>(
+                <div key={o.id} style={{background:C.surfUp,border:`1px solid ${C.bdr}`,borderRadius:10,padding:"11px 14px",marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:"bold",color:C.gold}}>Table {o.table_ids}</div>
+                      <div style={{fontSize:11,color:C.dim,marginTop:2}}>👤 {o.pax} pax · {(o.items||[]).length} items</div>
+                      <div style={{fontSize:10,color:C.faint,marginTop:2}}>{new Date(o.created_at).toLocaleString("en-MY",{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"})}</div>
+                    </div>
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:16,fontWeight:"bold",color:C.green}}>{rm(o.total)}</div>
+                      <div style={{fontSize:10,color:C.dim}}>incl. SST</div>
+                    </div>
+                  </div>
+                  {(o.items||[]).length>0&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px solid ${C.bdr}`,fontSize:11,color:C.dim,lineHeight:1.8}}>{(o.items||[]).map((it,i)=><span key={i}>{it.emoji} {it.name}{it.custom?` (${it.custom})`:""}{i<o.items.length-1?" · ":""}</span>)}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          {tab==="items"&&(
+            <div>
+              {topItems.length===0&&<div style={{color:C.faint,fontSize:13,textAlign:"center",padding:"30px 0"}}>No data yet</div>}
+              {topItems.map((it,i)=>(
+                <div key={it.name} style={{display:"flex",alignItems:"center",gap:12,padding:"11px 14px",background:C.surfUp,border:`1px solid ${C.bdr}`,borderRadius:10,marginBottom:8}}>
+                  <div style={{fontSize:10,fontWeight:"bold",color:C.faint,minWidth:20,textAlign:"center"}}>#{i+1}</div>
+                  <div style={{fontSize:20}}>{it.emoji}</div>
+                  <div style={{flex:1}}><div style={{fontSize:13,color:C.txt}}>{it.name}</div><div style={{fontSize:10,color:C.dim,marginTop:2}}>{it.cat}</div></div>
+                  <div style={{textAlign:"right"}}><div style={{fontSize:14,fontWeight:"bold",color:C.gold}}>{it.qty}×</div><div style={{fontSize:11,color:C.green}}>{rm(it.rev)}</div></div>
+                </div>
+              ))}
+            </div>
+          )}
+          {tab==="tables"&&(
+            <div>
+              {tStats.length===0&&<div style={{color:C.faint,fontSize:13,textAlign:"center",padding:"30px 0"}}>No data yet</div>}
+              {tStats.map(t=>(
+                <div key={t.table} style={{background:C.surfUp,border:`1px solid ${C.bdr}`,borderRadius:10,padding:"11px 14px",marginBottom:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                  <div><div style={{fontSize:13,fontWeight:"bold",color:C.gold}}>Table {t.table}</div><div style={{fontSize:11,color:C.dim,marginTop:2}}>{t.visits} visit{t.visits>1?"s":""} · {t.pax} total pax</div></div>
+                  <div style={{textAlign:"right"}}><div style={{fontSize:16,fontWeight:"bold",color:C.green}}>{rm(t.rev)}</div><div style={{fontSize:10,color:C.dim}}>{rm(t.rev/t.visits)}/visit</div></div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
