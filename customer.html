@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>Hakka Kopitiam — Order</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{background:#faf6f0;font-family:'Georgia','Times New Roman',serif;overscroll-behavior:none;}
+input,button,textarea{font-family:'Georgia','Times New Roman',serif;}
+::-webkit-scrollbar{width:4px;}
+::-webkit-scrollbar-thumb{background:#d4b896;border-radius:2px;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+// ── SUPABASE ──────────────────────────────────────────────
+const SUPA_URL = "https://qhhlvyluvjzsuycwakan.supabase.co";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaGx2eWx1dmp6c3V5Y3dha2FuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNzM3NzUsImV4cCI6MjA5MDk0OTc3NX0.pPk4PJ2UGwl1K0mUzYMhUbVM-rBP0yX_LDRrq71CGCA";
+const HDR = {"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY};
+
+async function submitOrder(payload) {
+  const r = await fetch(SUPA_URL+"/rest/v1/customer_orders",{
+    method:"POST",
+    headers:{...HDR,"Prefer":"return=minimal"},
+    body:JSON.stringify(payload),
+  });
+  if(!r.ok) throw new Error("HTTP "+r.status+": "+await r.text());
+}
+
+async function fetchMenu() {
+  const r = await fetch(SUPA_URL+"/rest/v1/menu_items?select=*&order=sort_order.asc,created_at.asc",{headers:HDR});
+  if(!r.ok) return null;
+  return r.json();
+}
+
+// ── VARIATIONS ────────────────────────────────────────────
+const sz2  = (a,b)   => ({key:"size",label:"Size",   options:[{label:"Small",base:a,mod:0},{label:"Big",base:b,mod:0}]});
+const sz3  = (a,b,c) => ({key:"size",label:"Size",   options:[{label:"Small",base:a,mod:0},{label:"Big",base:b,mod:0},{label:"Takeaway",base:c,mod:0}]});
+const sz2b = (b,c)   => ({key:"size",label:"Size",   options:[{label:"Big",base:b,mod:0},{label:"Takeaway",base:c,mod:0}]});
+const VN = {key:"noodle",label:"Noodle",options:[{label:"Yellow Noodles",mod:0},{label:"Hor Fun",mod:0},{label:"Rice Vermicelli",mod:0},{label:"Wanton Noodles",mod:0},{label:"Lao Shu Fen",mod:0},{label:"Instant Noodles",mod:0},{label:"Handmade (+RM1)",mod:1}]};
+const VS = {key:"style",label:"Style",options:[{label:"Soup",mod:0},{label:"Dry",mod:0}]};
+const VT = {key:"temp", label:"Temp", options:[{label:"Hot",mod:0},{label:"Ice",mod:0}]};
+const VC = {key:"choice",label:"Choice",options:[{label:"With Rice",mod:0},{label:"With Noodles",mod:0}]};
+
+const DEFAULT_MENU = {
+  "⭐ Specials":[
+    {id:"sp1",name:"Hakka Fried Pork Noodle",zh:"客家炸肉面",price:0,disp:"Ask staff",emoji:"🍜",v:[]},
+    {id:"sp2",name:"Hokkien Meat Rolls",zh:"福建卤肉卷",price:0,disp:"Ask staff",emoji:"🥢",v:[]},
+  ],
+  "🍜 Noodles":[
+    {id:"n1",name:"Penang Prawn Noodles",zh:"槟城虾面",price:10,big:11,emoji:"🍜",v:[sz2(10,11),VS,VN]},
+    {id:"n2",name:"Fried Prawn Noodles",zh:"炒虾面",price:11,big:12,emoji:"🍜",v:[sz2(11,12),VN]},
+    {id:"n3",name:"Fish Paste Noodles",zh:"家乡鱼滑粉",price:10,big:11,emoji:"🍜",v:[sz2(10,11),VS,VN]},
+    {id:"n4",name:"Luncheon Meat & Egg Noodles",zh:"餐蛋面",price:11,big:12,emoji:"🍜",v:[sz2(11,12),VS,VN]},
+    {id:"n5",name:"Wanton Noodles",zh:"云吞面",price:10,big:11,emoji:"🍜",v:[sz2(10,11),VS,VN]},
+    {id:"n6",name:"Penang White Curry Noodles",zh:"槟城白加哩面",price:11,big:12,emoji:"🍛",v:[sz2(11,12),VN]},
+    {id:"n7",name:"Fried Rice",zh:"炒饭",price:11,big:12,emoji:"🍚",v:[sz2(11,12)]},
+  ],
+  "📅 Daily":[
+    {id:"ds1",name:"Braised Pork",zh:"卤猪肉",price:15,emoji:"🥩",v:[VC]},
+    {id:"ds2",name:"Curry Chicken",zh:"咖喱鸡",price:15,emoji:"🍗",v:[VC]},
+    {id:"ds3",name:"Slow-Cooked Soup",zh:"老火靓汤",price:13,emoji:"🍲",v:[VC]},
+    {id:"ds4",name:"Pepper Pork Stomach Soup",zh:"胡椒猪肚汤",price:15,emoji:"🍲",v:[VC]},
+    {id:"ds5",name:"Braised Pork Trotter",zh:"卤猪脚",price:15,emoji:"🥩",v:[VC]},
+    {id:"ds6",name:"Fish Head Noodles",zh:"鱼头米",price:25,emoji:"🐟",v:[]},
+  ],
+  "🥟 Traditional":[
+    {id:"tr1",name:"Hakka Yong Tau Foo (min 4)",zh:"客家酿豆腐",price:2.50,disp:"RM2.50/pc",emoji:"🫕",v:[]},
+    {id:"tr2",name:"Ipoh Red Sauce Chee Cheong Fun",zh:"怡保红酱猪肠粉",price:5.50,emoji:"🍱",v:[]},
+    {id:"tr3",name:"Fried Wantan (10 pcs)",zh:"炸云吞",price:9,emoji:"🥟",v:[]},
+    {id:"tr4",name:"Fish Paste Soup",zh:"鱼滑汤",price:10,emoji:"🍲",v:[]},
+  ],
+  "🍞 Toast":[
+    {id:"tb1",name:"Kaya & Butter Toast",zh:"烤面包",price:3.50,emoji:"🍞",v:[]},
+    {id:"tb2",name:"Garlic Bread",zh:"蒜蓉面包",price:4.50,emoji:"🥖",v:[]},
+    {id:"tb3",name:"Croissant - Plain",zh:"牛角包-原味",price:7.00,emoji:"🥐",v:[]},
+    {id:"tb4",name:"Croissant - Kaya & Butter",zh:"牛角包-咖椰牛油",price:9.00,emoji:"🥐",v:[]},
+    {id:"tb5",name:"Croissant - Luncheon Meat & Egg",zh:"牛角包-餐蛋",price:11.00,emoji:"🥐",v:[]},
+    {id:"tb6",name:"Luncheon Meat & Egg Sandwich",zh:"餐蛋面包",price:9.00,emoji:"🥪",v:[]},
+    {id:"tb7",name:"Soft Boiled Kampung Egg",zh:"菜园生熟蛋",price:4.00,emoji:"🥚",v:[]},
+  ],
+  "☕ Drinks":[
+    {id:"d1",name:"Ipoh White Coffee O",zh:"怡保白咖啡O",price:2.80,emoji:"☕",v:[sz3(2.80,3.30,3.80),VT]},
+    {id:"d2",name:"Ipoh White Coffee",zh:"怡保白咖啡",price:3.30,emoji:"☕",v:[sz3(3.30,3.80,4.30),VT]},
+    {id:"d3",name:"Teh O",zh:"奶茶O",price:2.80,emoji:"🍵",v:[sz3(2.80,3.30,3.80),VT]},
+    {id:"d4",name:"Teh",zh:"奶茶",price:3.30,emoji:"🍵",v:[sz3(3.30,3.80,4.30),VT]},
+    {id:"d5",name:"Hailam Teh O",zh:"海南奶茶O",price:2.80,emoji:"🍵",v:[sz3(2.80,3.30,3.80),VT]},
+    {id:"d6",name:"Hailam Teh",zh:"海南奶茶",price:3.30,emoji:"🍵",v:[sz3(3.30,3.80,4.30),VT]},
+    {id:"d7",name:"Nescafe O",zh:"Nescafe O",price:3.00,emoji:"☕",v:[sz3(3.00,3.50,4.00),VT]},
+    {id:"d8",name:"Nescafe",zh:"Nescafe",price:3.50,emoji:"☕",v:[sz3(3.50,4.00,4.50),VT]},
+    {id:"d9",name:"Milo",zh:"美禄",price:3.50,emoji:"🥛",v:[sz3(3.50,4.00,4.50),VT]},
+    {id:"d10",name:"Sour Plum Calamansi",zh:"金桔酸梅",price:4.00,emoji:"🍋",v:[sz2b(4.00,4.50),VT]},
+    {id:"d11",name:"Honey Lemon",zh:"蜂蜜柠檬",price:4.00,emoji:"🍯",v:[sz2b(4.00,4.50),VT]},
+    {id:"d12",name:"Pumpkin Barley",zh:"金瓜薏米水",price:3.50,emoji:"🎃",v:[sz2b(3.50,4.00),VT]},
+    {id:"d13",name:"Herbal Tea (2 pax)",zh:"六宝靓茶",price:4.00,disp:"RM4.00 +RM1/pax",emoji:"🫖",v:[VT]},
+    {id:"d14",name:"Chinese Tea",zh:"中国茶",price:0.80,emoji:"🫖",v:[sz2b(0.80,1.00),VT]},
+    {id:"d15",name:"Drinking Water",zh:"白开水",price:0.50,emoji:"💧",v:[]},
+  ],
+  "➕ Add-ons":[
+    {id:"ao1",name:"Fried Egg",zh:"荷包蛋",price:1.50,emoji:"🍳",v:[]},
+    {id:"ao2",name:"Onion Fried Egg",zh:"大葱煎蛋",price:8.00,big:15.00,emoji:"🍳",v:[sz2(8,15)]},
+    {id:"ao3",name:"Vegetables of the Day",zh:"时菜",price:15.00,big:20.00,emoji:"🥬",v:[sz2(15,20)]},
+    {id:"ao4",name:"White Rice",zh:"白饭",price:1.50,big:2.00,emoji:"🍚",v:[sz2(1.5,2)]},
+  ],
+};
+
+// ── HELPERS ───────────────────────────────────────────────
+const hasV = i => i.v && i.v.length > 0;
+const rm   = n => "RM"+(+(n||0)).toFixed(2);
+
+function defSel(item){const s={};(item.v||[]).forEach(vg=>{s[vg.key]=0;});return s;}
+function iPrice(item,sel){
+  let base=item.price||0;
+  (item.v||[]).forEach(vg=>{
+    const opt=vg.options[(sel&&sel[vg.key])||0];
+    if(!opt)return;
+    if(opt.base!==undefined)base=opt.base;else base+=opt.mod||0;
+  });
+  return base;
+}
+function iLabel(item,sel){
+  return(item.v||[]).map(vg=>{
+    const opt=vg.options[(sel&&sel[vg.key])||0];
+    return opt?opt.label.replace(/ \(\+RM\d+\)/,""):"";
+  }).filter(Boolean).join(" · ");
+}
+function cartTotal(cart){return cart.reduce((s,ci)=>s+iPrice(ci.item,ci.sel)*ci.qty,0);}
+function cartCount(cart){return cart.reduce((s,ci)=>s+ci.qty,0);}
+
+// get table from URL ?table=L1
+function getTableId(){
+  const p = new URLSearchParams(window.location.search);
+  return p.get("table")||p.get("t")||"?";
+}
+
+// colours — warm light theme
+const K = {
+  bg:"#faf6f0", card:"#ffffff", surf:"#fff8f0",
+  bdr:"#e8d8c4", bdrDark:"#c9a96e",
+  txt:"#2a1a0a", dim:"#8a6a4a", faint:"#c4a882",
+  gold:"#c9a96e", goldDk:"#a07840",
+  green:"#2d7a4a", red:"#cc3333",
+  brown:"#5c3a1e",
+};
+
+// ── APP ───────────────────────────────────────────────────
+function App(){
+  const tableId = getTableId();
+  const [MENU,  setMENU]  = useState(DEFAULT_MENU);
+  const [cats,  setCats]  = useState(Object.keys(DEFAULT_MENU));
+  const [cat,   setCat]   = useState(Object.keys(DEFAULT_MENU)[0]);
+  const [cart,  setCart]  = useState([]); // [{id, item, sel, qty}]
+  const [view,  setView]  = useState("menu"); // menu | cart | confirm | done
+  const [note,  setNote]  = useState("");
+  const [sending, setSending] = useState(false);
+  const [error,   setError]   = useState(null);
+  const [expandedItem, setExpandedItem] = useState(null);
+
+  // load DB menu
+  useEffect(()=>{
+    fetchMenu().then(data=>{
+      if(data && data.length>0){
+        const grouped={};
+        data.filter(i=>!i.sold_out).forEach(item=>{
+          const c=item.category;
+          if(!grouped[c])grouped[c]=[];
+          const v=item.variations?(typeof item.variations==="string"?JSON.parse(item.variations):item.variations):[];
+          grouped[c].push({id:item.id,name:item.name,zh:item.name_zh||"",price:parseFloat(item.price)||0,big:item.price_big?parseFloat(item.price_big):null,disp:item.price_display||null,emoji:item.emoji||"☕",v,sold_out:false});
+        });
+        if(Object.keys(grouped).length>0){
+          setMENU(grouped);
+          setCats(Object.keys(grouped));
+          setCat(Object.keys(grouped)[0]);
+        }
+      }
+    }).catch(()=>{});
+  },[]);
+
+  // cart helpers
+  function addToCart(item, sel){
+    setCart(prev=>{
+      // if same item + same sel exists, increment
+      const key = item.id+"_"+JSON.stringify(sel);
+      const existing = prev.find(ci=>ci.id===key);
+      if(existing) return prev.map(ci=>ci.id===key?{...ci,qty:ci.qty+1}:ci);
+      return [...prev,{id:key,item,sel,qty:1}];
+    });
+  }
+  function removeFromCart(cartId){
+    setCart(prev=>{
+      const ci=prev.find(c=>c.id===cartId);
+      if(!ci)return prev;
+      if(ci.qty<=1)return prev.filter(c=>c.id!==cartId);
+      return prev.map(c=>c.id===cartId?{...c,qty:c.qty-1}:c);
+    });
+  }
+  function getQty(item,sel){
+    const key=item.id+"_"+JSON.stringify(sel);
+    return cart.find(c=>c.id===key)?.qty||0;
+  }
+
+  async function sendOrder(){
+    if(cart.length===0)return;
+    setSending(true);setError(null);
+    const items=cart.map(ci=>({
+      name:ci.item.name,zh:ci.item.zh,emoji:ci.item.emoji,
+      price:iPrice(ci.item,ci.sel),qty:ci.qty,
+      custom:iLabel(ci.item,ci.sel)||null,
+    }));
+    const total=cartTotal(cart);
+    try{
+      await submitOrder({table_id:tableId,items,total:+total.toFixed(2),note:note.trim()||null,status:"pending"});
+      setView("done");
+    }catch(e){
+      setError("Could not send order. Please ask a staff member.");
+    }
+    setSending(false);
+  }
+
+  const count=cartCount(cart);
+  const total=cartTotal(cart);
+
+  if(tableId==="?") return <NoTable/>;
+
+  return(
+    <div style={{minHeight:"100dvh",background:K.bg,color:K.txt,fontFamily:"Georgia,'Times New Roman',serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"}}>
+
+      {view==="done" && <DoneView tableId={tableId} onNewOrder={()=>{setCart([]);setNote("");setView("menu");}}/>}
+      {view==="confirm" && (
+        <ConfirmView cart={cart} total={total} tableId={tableId} note={note} setNote={setNote}
+          sending={sending} error={error}
+          onSend={sendOrder} onBack={()=>setView("cart")}/>
+      )}
+      {view==="cart" && (
+        <CartView cart={cart} total={total} tableId={tableId}
+          onAdd={(cartId)=>{
+            const ci=cart.find(c=>c.id===cartId);
+            if(ci)addToCart(ci.item,ci.sel);
+          }}
+          onRemove={removeFromCart}
+          onBack={()=>setView("menu")}
+          onCheckout={()=>setView("confirm")}/>
+      )}
+      {view==="menu" && (
+        <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+          {/* Header */}
+          <div style={{background:K.brown,padding:"20px 18px 16px",position:"relative",overflow:"hidden"}}>
+            <div style={{position:"absolute",top:0,left:0,right:0,bottom:0,opacity:0.06,background:"repeating-linear-gradient(45deg,#fff 0,#fff 1px,transparent 0,transparent 50%)",backgroundSize:"10px 10px"}}/>
+            <div style={{position:"relative"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                <div>
+                  <div style={{fontSize:9,color:"#d4b896",letterSpacing:3,marginBottom:4}}>WELCOME TO</div>
+                  <div style={{fontSize:20,fontWeight:"bold",color:"#fff",letterSpacing:1}}>Hakka Kopitiam</div>
+                  <div style={{fontSize:11,color:"#d4b896",marginTop:2}}>家的味道 · Taman Gembira</div>
+                </div>
+                <div style={{background:"rgba(255,255,255,0.15)",borderRadius:10,padding:"8px 14px",textAlign:"center"}}>
+                  <div style={{fontSize:9,color:"#d4b896",letterSpacing:1}}>TABLE</div>
+                  <div style={{fontSize:22,fontWeight:"bold",color:"#fff",lineHeight:1}}>{tableId}</div>
+                </div>
+              </div>
+              <div style={{marginTop:14,fontSize:11,color:"#d4b896"}}>Browse the menu and tap + to add items 🍜</div>
+            </div>
+          </div>
+
+          {/* Category tabs */}
+          <div style={{background:K.card,borderBottom:`1px solid ${K.bdr}`,padding:"0 16px"}}>
+            <div style={{display:"flex",gap:0,overflowX:"auto",paddingBottom:0}}>
+              {cats.map(c=>(
+                <button key={c} onClick={()=>setCat(c)} style={{flexShrink:0,padding:"13px 14px",border:"none",borderBottom:`3px solid ${cat===c?K.gold:"transparent"}`,background:"none",color:cat===c?K.goldDk:K.dim,fontSize:12,cursor:"pointer",fontWeight:cat===c?"bold":"normal",whiteSpace:"nowrap",transition:"all 0.15s"}}>
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Menu items */}
+          <div style={{flex:1,overflowY:"auto",padding:"12px 16px 120px"}}>
+            {cat==="🍜 Noodles"&&(
+              <div style={{background:"#fffbf0",border:`1px solid ${K.bdr}`,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:11,color:K.dim,lineHeight:1.8}}>
+                🍜 <strong style={{color:K.goldDk}}>Noodle choices:</strong> Yellow · Hor Fun · Rice Vermicelli · Wanton · Lao Shu Fen · Instant · Handmade (+RM1)
+              </div>
+            )}
+            {cat==="📅 Daily"&&(
+              <div style={{background:"#fffbf0",border:`1px solid ${K.bdr}`,borderRadius:10,padding:"10px 14px",marginBottom:12,fontSize:11,color:K.dim}}>
+                🍚 All daily specials come with your choice of <strong style={{color:K.goldDk}}>Rice or Noodles</strong>
+              </div>
+            )}
+
+            <div style={{display:"flex",flexDirection:"column",gap:10}}>
+              {(MENU[cat]||[]).filter(item=>!item.sold_out).map(item=>{
+                const isExpanded = expandedItem===item.id;
+                const priceStr = item.disp||(item.big?`${rm(item.price)} – ${rm(item.big)}`:rm(item.price));
+                const simpleQty = !hasV(item)?getQty(item,{}):0;
+
+                return(
+                  <div key={item.id} style={{background:K.card,border:`1px solid ${K.bdr}`,borderRadius:14,overflow:"hidden",boxShadow:"0 2px 8px rgba(0,0,0,0.04)"}}>
+                    {/* Item row */}
+                    <div style={{display:"flex",alignItems:"center",padding:"14px 14px",gap:12}}>
+                      <div style={{fontSize:32,flexShrink:0,width:44,textAlign:"center"}}>{item.emoji}</div>
+                      <div style={{flex:1,minWidth:0}}>
+                        <div style={{fontSize:14,color:K.txt,fontWeight:"600",lineHeight:1.3}}>{item.name}</div>
+                        <div style={{fontSize:11,color:K.faint,marginTop:2}}>{item.zh}</div>
+                        <div style={{fontSize:14,color:K.goldDk,fontWeight:"bold",marginTop:4}}>{priceStr}</div>
+                      </div>
+                      {/* Controls */}
+                      {!hasV(item)?(
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                          {simpleQty>0&&(
+                            <button onClick={()=>removeFromCart(item.id+"_"+JSON.stringify({}))} style={{width:32,height:32,borderRadius:"50%",border:`1.5px solid ${K.bdr}`,background:K.bg,color:K.txt,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                          )}
+                          {simpleQty>0&&<span style={{fontSize:15,fontWeight:"bold",color:K.green,minWidth:16,textAlign:"center"}}>{simpleQty}</span>}
+                          <button onClick={()=>addToCart(item,{})} style={{width:36,height:36,borderRadius:"50%",border:"none",background:K.gold,color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",boxShadow:`0 2px 8px ${K.gold}55`}}>+</button>
+                        </div>
+                      ):(
+                        <button onClick={()=>setExpandedItem(isExpanded?null:item.id)} style={{padding:"8px 14px",borderRadius:20,border:`1.5px solid ${K.gold}`,background:isExpanded?K.gold:K.bg,color:isExpanded?"#fff":K.goldDk,fontSize:12,cursor:"pointer",fontWeight:"bold",flexShrink:0,transition:"all 0.15s"}}>
+                          {isExpanded?"Done":"Choose"}
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Variation panel — expands inline */}
+                    {hasV(item)&&isExpanded&&(
+                      <VariationPanel item={item} onAdd={(sel)=>{addToCart(item,sel);}} cart={cart} onRemove={removeFromCart}/>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Floating cart button */}
+          {count>0&&(
+            <div style={{position:"fixed",bottom:0,left:"50%",transform:"translateX(-50%)",width:"100%",maxWidth:480,padding:"16px 20px 28px",background:"linear-gradient(transparent,"+K.bg+" 40%)",pointerEvents:"none"}}>
+              <button onClick={()=>setView("cart")} style={{width:"100%",padding:"16px 20px",background:K.brown,border:"none",color:"#fff",borderRadius:16,cursor:"pointer",fontSize:15,fontWeight:"bold",display:"flex",justifyContent:"space-between",alignItems:"center",boxShadow:"0 4px 20px rgba(92,58,30,0.35)",pointerEvents:"all"}}>
+                <div style={{background:"rgba(255,255,255,0.2)",borderRadius:8,padding:"2px 10px",fontSize:13,fontWeight:"bold"}}>{count}</div>
+                <span>View Order</span>
+                <span style={{fontSize:15,fontWeight:"bold"}}>{rm(total)}</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── VARIATION PANEL ───────────────────────────────────────
+function VariationPanel({item,onAdd,cart,onRemove}){
+  const [sel,setSel]=useState(()=>{
+    const s={};(item.v||[]).forEach(vg=>{s[vg.key]=0;});return s;
+  });
+
+  function setV(k,i){setSel(s=>({...s,[k]:i}));}
+  function price(){
+    let base=item.price||0;
+    (item.v||[]).forEach(vg=>{
+      const opt=vg.options[(sel&&sel[vg.key])||0];
+      if(!opt)return;
+      if(opt.base!==undefined)base=opt.base;else base+=opt.mod||0;
+    });
+    return base;
+  }
+  const label=(item.v||[]).map(vg=>{const opt=vg.options[sel[vg.key]||0];return opt?opt.label.replace(/ \(\+RM\d+\)/,""):"";}).filter(Boolean).join(" · ");
+  const key=item.id+"_"+JSON.stringify(sel);
+  const qty=cart.find(c=>c.id===key)?.qty||0;
+
+  return(
+    <div style={{borderTop:`1px solid ${K.bdr}`,background:"#fffcf8",padding:"14px 16px"}}>
+      {(item.v||[]).map(vg=>(
+        <div key={vg.key} style={{marginBottom:12}}>
+          <div style={{fontSize:11,color:K.dim,fontWeight:"bold",marginBottom:7,letterSpacing:0.5}}>{vg.label.toUpperCase()}</div>
+          <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+            {vg.options.map((opt,oIdx)=>{
+              const s=(sel[vg.key]||0)===oIdx;
+              return(
+                <button key={oIdx} onClick={()=>setV(vg.key,oIdx)} style={{padding:"7px 14px",borderRadius:20,border:`1.5px solid ${s?K.gold:K.bdr}`,background:s?K.gold:"#fff",color:s?"#fff":K.dim,fontSize:12,cursor:"pointer",fontWeight:s?"bold":"normal",transition:"all 0.12s"}}>
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:4}}>
+        <div style={{fontSize:13,color:K.goldDk,fontWeight:"bold"}}>{rm(price())} · {label}</div>
+        <div style={{display:"flex",alignItems:"center",gap:10}}>
+          {qty>0&&<button onClick={()=>onRemove(key)} style={{width:32,height:32,borderRadius:"50%",border:`1.5px solid ${K.bdr}`,background:"#fff",color:K.txt,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>}
+          {qty>0&&<span style={{fontSize:15,fontWeight:"bold",color:K.green,minWidth:16,textAlign:"center"}}>{qty}</span>}
+          <button onClick={()=>onAdd(sel)} style={{width:36,height:36,borderRadius:"50%",border:"none",background:K.gold,color:"#fff",fontSize:20,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold",boxShadow:`0 2px 8px ${K.gold}55`}}>+</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── CART VIEW ─────────────────────────────────────────────
+function CartView({cart,total,tableId,onAdd,onRemove,onBack,onCheckout}){
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+      <div style={{background:K.brown,padding:"16px 18px",display:"flex",alignItems:"center",gap:12}}>
+        <button onClick={onBack} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <div>
+          <div style={{fontWeight:"bold",color:"#fff",fontSize:16}}>Your Order</div>
+          <div style={{fontSize:11,color:"#d4b896"}}>Table {tableId}</div>
+        </div>
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:"16px 16px 20px"}}>
+        {cart.length===0?(
+          <div style={{textAlign:"center",padding:"60px 0",color:K.faint}}>
+            <div style={{fontSize:40,marginBottom:12}}>🛒</div>
+            <div style={{fontSize:14}}>Your order is empty</div>
+          </div>
+        ):cart.map(ci=>{
+          const lbl=iLabel(ci.item,ci.sel);
+          return(
+            <div key={ci.id} style={{background:K.card,border:`1px solid ${K.bdr}`,borderRadius:12,padding:"14px",marginBottom:10,display:"flex",alignItems:"center",gap:12}}>
+              <div style={{fontSize:26,flexShrink:0}}>{ci.item.emoji}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,color:K.txt,fontWeight:"600"}}>{ci.item.name}</div>
+                {lbl&&<div style={{fontSize:11,color:K.dim,marginTop:2}}>↳ {lbl}</div>}
+                <div style={{fontSize:13,color:K.goldDk,fontWeight:"bold",marginTop:3}}>{rm(iPrice(ci.item,ci.sel))} each</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                <button onClick={()=>onRemove(ci.id)} style={{width:30,height:30,borderRadius:"50%",border:`1.5px solid ${K.bdr}`,background:K.bg,color:K.txt,fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center"}}>−</button>
+                <span style={{fontSize:15,fontWeight:"bold",color:K.green,minWidth:20,textAlign:"center"}}>{ci.qty}</span>
+                <button onClick={()=>onAdd(ci.id)} style={{width:30,height:30,borderRadius:"50%",border:"none",background:K.gold,color:"#fff",fontSize:18,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:"bold"}}>+</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {cart.length>0&&(
+        <div style={{padding:"16px 18px 32px",background:K.card,borderTop:`1px solid ${K.bdr}`}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:18,fontWeight:"bold",marginBottom:14}}>
+            <span style={{color:K.txt}}>Total</span>
+            <span style={{color:K.goldDk}}>{rm(total)}</span>
+          </div>
+          <button onClick={onCheckout} style={{width:"100%",padding:"16px",background:K.brown,border:"none",color:"#fff",borderRadius:14,cursor:"pointer",fontSize:15,fontWeight:"bold",boxShadow:"0 4px 16px rgba(92,58,30,0.3)"}}>
+            Review & Send Order →
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── CONFIRM VIEW ──────────────────────────────────────────
+function ConfirmView({cart,total,tableId,note,setNote,sending,error,onSend,onBack}){
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
+      <div style={{background:K.brown,padding:"16px 18px",display:"flex",alignItems:"center",gap:12}}>
+        <button onClick={onBack} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
+        <div>
+          <div style={{fontWeight:"bold",color:"#fff",fontSize:16}}>Confirm Order</div>
+          <div style={{fontSize:11,color:"#d4b896"}}>Table {tableId}</div>
+        </div>
+      </div>
+
+      <div style={{flex:1,overflowY:"auto",padding:"16px 18px 20px"}}>
+        {/* Order summary */}
+        <div style={{background:K.card,border:`1px solid ${K.bdr}`,borderRadius:14,padding:"16px",marginBottom:16}}>
+          <div style={{fontSize:11,color:K.dim,letterSpacing:1,marginBottom:12}}>ORDER SUMMARY</div>
+          {cart.map(ci=>{
+            const lbl=iLabel(ci.item,ci.sel);
+            return(
+              <div key={ci.id} style={{display:"flex",justifyContent:"space-between",marginBottom:10,alignItems:"flex-start"}}>
+                <div style={{flex:1}}>
+                  <span style={{fontSize:13,color:K.txt}}>{ci.item.emoji} {ci.item.name}</span>
+                  {lbl&&<div style={{fontSize:11,color:K.dim,marginTop:1}}>↳ {lbl}</div>}
+                </div>
+                <div style={{textAlign:"right",flexShrink:0,marginLeft:12}}>
+                  <div style={{fontSize:12,color:K.dim}}>×{ci.qty}</div>
+                  <div style={{fontSize:13,color:K.goldDk,fontWeight:"bold"}}>{rm(iPrice(ci.item,ci.sel)*ci.qty)}</div>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{borderTop:`1px dashed ${K.bdr}`,marginTop:8,paddingTop:10,display:"flex",justifyContent:"space-between"}}>
+            <span style={{fontWeight:"bold",color:K.txt,fontSize:15}}>Total</span>
+            <span style={{fontWeight:"bold",color:K.goldDk,fontSize:16}}>{rm(total)}</span>
+          </div>
+        </div>
+
+        {/* Note */}
+        <div style={{background:K.card,border:`1px solid ${K.bdr}`,borderRadius:14,padding:"16px",marginBottom:16}}>
+          <div style={{fontSize:11,color:K.dim,letterSpacing:1,marginBottom:8}}>SPECIAL REQUEST <span style={{color:K.faint}}>(optional)</span></div>
+          <textarea
+            value={note}
+            onChange={e=>setNote(e.target.value.slice(0,60))}
+            placeholder="e.g. less sugar, no ice, extra spicy..."
+            rows={2}
+            style={{width:"100%",padding:"10px 12px",background:K.bg,border:`1px solid ${K.bdr}`,borderRadius:10,color:K.txt,fontSize:13,outline:"none",resize:"none",boxSizing:"border-box",lineHeight:1.6}}
+          />
+          <div style={{textAlign:"right",fontSize:10,color:K.faint,marginTop:4}}>{note.length}/60</div>
+        </div>
+
+        {error&&(
+          <div style={{background:"#fff0f0",border:`1px solid ${K.red}`,borderRadius:10,padding:"12px 14px",marginBottom:16,fontSize:13,color:K.red,textAlign:"center"}}>
+            {error}
+          </div>
+        )}
+
+        <div style={{background:"#fffbf0",border:`1px solid ${K.bdr}`,borderRadius:12,padding:"12px 14px",fontSize:12,color:K.dim,lineHeight:1.8,marginBottom:8}}>
+          ℹ️ Your order will be sent to our staff. Payment is collected at the end of your visit.
+        </div>
+      </div>
+
+      <div style={{padding:"14px 18px 32px",background:K.card,borderTop:`1px solid ${K.bdr}`}}>
+        <button onClick={onSend} disabled={sending} style={{width:"100%",padding:"16px",background:sending?"#c4a882":K.green,border:"none",color:"#fff",borderRadius:14,cursor:sending?"not-allowed":"pointer",fontSize:15,fontWeight:"bold",boxShadow:sending?"none":"0 4px 16px rgba(45,122,74,0.3)"}}>
+          {sending?"Sending order…":"✓ Send Order to Kitchen"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── DONE VIEW ─────────────────────────────────────────────
+function DoneView({tableId,onNewOrder}){
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 32px",textAlign:"center",background:K.bg}}>
+      <div style={{fontSize:72,marginBottom:20,animation:"bounce 1s"}}>✅</div>
+      <div style={{fontSize:24,fontWeight:"bold",color:K.green,marginBottom:8}}>Order Sent!</div>
+      <div style={{fontSize:15,color:K.txt,marginBottom:6}}>Thank you!</div>
+      <div style={{fontSize:13,color:K.dim,marginBottom:32,lineHeight:1.8}}>
+        Your order has been sent to our staff.<br/>
+        We'll serve you shortly at <strong>Table {tableId}</strong>.
+      </div>
+      <div style={{background:K.card,border:`1px solid ${K.bdr}`,borderRadius:16,padding:"20px 24px",marginBottom:32,width:"100%",maxWidth:300}}>
+        <div style={{fontSize:22,marginBottom:8}}>☕</div>
+        <div style={{fontSize:14,fontWeight:"bold",color:K.brown,marginBottom:4}}>Hakka Kopitiam</div>
+        <div style={{fontSize:12,color:K.dim}}>家的味道 · Taman Gembira, KL</div>
+      </div>
+      <button onClick={onNewOrder} style={{padding:"14px 32px",background:"none",border:`2px solid ${K.gold}`,color:K.goldDk,borderRadius:30,cursor:"pointer",fontSize:14,fontWeight:"bold"}}>
+        + Add More Items
+      </button>
+    </div>
+  );
+}
+
+// ── NO TABLE ──────────────────────────────────────────────
+function NoTable(){
+  return(
+    <div style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",padding:"40px 32px",textAlign:"center"}}>
+      <div style={{fontSize:48,marginBottom:16}}>🪑</div>
+      <div style={{fontSize:18,fontWeight:"bold",color:K.txt,marginBottom:8}}>No Table Selected</div>
+      <div style={{fontSize:13,color:K.dim,lineHeight:1.8}}>Please scan the QR code on your table to place an order.</div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
