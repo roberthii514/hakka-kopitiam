@@ -17,6 +17,8 @@ input,button,select,textarea{font-family:Georgia,'Times New Roman',serif;}
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:#2c2519;border-radius:2px;}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.85;transform:scale(1.06);}}
+.bell-pulse{animation:pulse 1.2s ease-in-out infinite;}
 </style>
 </head>
 <body>
@@ -267,12 +269,58 @@ function App(){
     }catch(e){}
   }
 
-  async function confirmCustOrder(id){
+  async function confirmCustOrder(order){
     try{
-      await dbConfirmCustomerOrder(id);
-      setCustOrders(prev=>prev.filter(o=>o.id!==id));
-      showToast("✓ Order confirmed",true);
-    }catch(e){showToast("Error confirming",false);}
+      await dbConfirmCustomerOrder(order.id);
+      setCustOrders(prev=>prev.filter(o=>o.id!==order.id));
+
+      // ── Wire up the floor map ──────────────────────────
+      const tid = order.table_id; // e.g. "L1"
+      const gid = tid; // standalone group id = table id
+
+      // Build orderItems from the customer order items
+      // We create simple "virtual" item objects from the saved data
+      const ois = (order.items||[]).flatMap(it=>{
+        const arr = [];
+        for(let q=0;q<(it.qty||1);q++){
+          arr.push({
+            id: Date.now()+"_"+Math.random(),
+            item: {
+              id: "cust_"+it.name.replace(/\s/g,"_"),
+              name: it.name,
+              zh: it.zh||"",
+              emoji: it.emoji||"🍜",
+              price: it.price||0,
+              v: [], // no variations needed — already resolved
+            },
+            sel: {},
+          });
+        }
+        return arr;
+      });
+
+      // Set pax to 1 as default (customer didn't specify)
+      // Staff can always adjust later
+      const pax = order.pax || 1;
+
+      setGroups(prev=>{
+        const existing = prev[gid];
+        if(existing){
+          // Table already has a session — append items
+          return{...prev,[gid]:{...existing,ois:[...existing.ois,...ois]}};
+        } else {
+          // New session for this table
+          return{...prev,[gid]:{tableIds:[tid],pax,ois}};
+        }
+      });
+
+      // Make sure tGroup knows about this table
+      setTGroup(prev=>({...prev,[tid]:tid}));
+      // Remove the tGroup entry so the table uses its own id as gid
+      setTGroup(prev=>{const n={...prev};delete n[tid];return n;});
+
+      showToast("✓ Table "+tid+" is now active with customer order",true);
+    }catch(e){showToast("Error confirming: "+e.message,false);}
   }
 
   async function dismissCustOrder(id){
@@ -430,7 +478,7 @@ function App(){
                 <div style={{fontSize:10,color:C.dim}}>家的味道 · Taman Gembira, KL</div>
               </div>
               <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                <button onClick={()=>setShowCustOrders(s=>!s)} style={{position:"relative",background:custOrders.length>0?"#8b0000":C.surfUp,border:`1.5px solid ${custOrders.length>0?C.red:C.bdr}`,color:custOrders.length>0?"#fff":C.dim,padding:"7px 11px",borderRadius:9,cursor:"pointer",fontSize:13,fontWeight:"bold",transition:"all 0.2s",boxShadow:custOrders.length>0?`0 0 10px ${C.red}55`:"none"}}>
+                <button onClick={()=>setShowCustOrders(s=>!s)} className={custOrders.length>0?"bell-pulse":""} style={{position:"relative",background:custOrders.length>0?"#8b0000":C.surfUp,border:`1.5px solid ${custOrders.length>0?C.red:C.bdr}`,color:custOrders.length>0?"#fff":C.dim,padding:"7px 11px",borderRadius:9,cursor:"pointer",fontSize:13,fontWeight:"bold",transition:"background 0.2s",boxShadow:custOrders.length>0?`0 0 12px ${C.red}66`:"none"}}>
                   🔔{custOrders.length>0&&<span style={{marginLeft:4}}>{custOrders.length}</span>}
                 </button>
                 <button onClick={()=>setView("admin_login")} style={{background:C.orange+"22",border:`1px solid ${C.orange}66`,color:C.orange,padding:"7px 11px",borderRadius:9,cursor:"pointer",fontSize:12}}>⚙️</button>
@@ -455,8 +503,10 @@ function App(){
                 <button onClick={()=>setShowCustOrders(false)} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:16}}>✕</button>
               </div>
               {custOrders.length===0?(
-                <div style={{fontSize:12,color:C.dim,textAlign:"center",padding:"10px 0"}}>No pending orders</div>
-              ):custOrders.map(o=>(
+                <div style={{fontSize:12,color:C.dim,textAlign:"center",padding:"10px 0"}}>No pending orders right now ✓</div>
+              ):<>
+              <div style={{fontSize:11,color:C.dim,marginBottom:10,lineHeight:1.6}}>Tap <strong style={{color:C.green}}>Confirm</strong> to accept the order and activate the table on the floor map.</div>
+              {custOrders.map(o=>(
                 <div key={o.id} style={{background:C.surfUp,border:`1px solid ${C.red}33`,borderRadius:10,padding:"12px 14px",marginBottom:8}}>
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                     <div>
@@ -476,11 +526,12 @@ function App(){
                     </div>
                   )}
                   <div style={{display:"flex",gap:8}}>
-                    <button onClick={()=>confirmCustOrder(o.id)} style={{flex:2,padding:"8px",background:C.green,border:"none",color:"#fff",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:"bold"}}>✓ Confirm</button>
+                    <button onClick={()=>confirmCustOrder(o)} style={{flex:2,padding:"8px",background:C.green,border:"none",color:"#fff",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:"bold"}}>✓ Confirm</button>
                     <button onClick={()=>dismissCustOrder(o.id)} style={{flex:1,padding:"8px",background:"none",border:`1px solid ${C.bdr}`,color:C.dim,borderRadius:8,cursor:"pointer",fontSize:12}}>Dismiss</button>
                   </div>
                 </div>
               ))}
+              </>}
             </div>
           )}
 
