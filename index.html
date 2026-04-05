@@ -61,6 +61,19 @@ async function dbToggleSoldOut(id, sold_out) {
   const r = await fetch(SUPA_URL+"/rest/v1/menu_items?id=eq."+id,{method:"PATCH",headers:{...HDR,"Prefer":"return=minimal"},body:JSON.stringify({sold_out})});
   if(!r.ok) throw new Error("HTTP "+r.status+": "+await r.text());
 }
+async function dbFetchCustomerOrders() {
+  const r = await fetch(SUPA_URL+"/rest/v1/customer_orders?select=*&status=eq.pending&order=created_at.asc",{headers:HDR});
+  if(!r.ok) return [];
+  return r.json();
+}
+async function dbConfirmCustomerOrder(id) {
+  const r = await fetch(SUPA_URL+"/rest/v1/customer_orders?id=eq."+id,{method:"PATCH",headers:{...HDR,"Prefer":"return=minimal"},body:JSON.stringify({status:"confirmed"})});
+  if(!r.ok) throw new Error("HTTP "+r.status+": "+await r.text());
+}
+async function dbDismissCustomerOrder(id) {
+  const r = await fetch(SUPA_URL+"/rest/v1/customer_orders?id=eq."+id,{method:"PATCH",headers:{...HDR,"Prefer":"return=minimal"},body:JSON.stringify({status:"done"})});
+  if(!r.ok) throw new Error("HTTP "+r.status+": "+await r.text());
+}
 
 // ── BUILT-IN MENU (fallback if DB empty) ─────────────────
 const sz2  = (a,b)   => ({key:"size",label:"Size",   options:[{label:"Small",base:a,mod:0},{label:"Big",base:b,mod:0}]});
@@ -234,13 +247,40 @@ function App(){
   const [saving,    setSaving]    = useState(false);
   const [toast,     setToast]     = useState(null);
   const [saveErr,   setSaveErr]   = useState(null);
-  const [liveMenu,  setLiveMenu]  = useState(null); // null = loading, {} = loaded
+  const [liveMenu,  setLiveMenu]  = useState(null);
   const [menuLoading, setMenuLoading] = useState(true);
+  const [custOrders,  setCustOrders]  = useState([]);
+  const [showCustOrders, setShowCustOrders] = useState(false);
+  const pollRef = useRef(null);
 
-  // Load menu from Supabase on mount
   useEffect(()=>{
     loadMenu();
+    pollCustomerOrders();
+    pollRef.current = setInterval(pollCustomerOrders, 15000);
+    return ()=>clearInterval(pollRef.current);
   },[]);
+
+  async function pollCustomerOrders(){
+    try{
+      const data = await dbFetchCustomerOrders();
+      setCustOrders(Array.isArray(data)?data:[]);
+    }catch(e){}
+  }
+
+  async function confirmCustOrder(id){
+    try{
+      await dbConfirmCustomerOrder(id);
+      setCustOrders(prev=>prev.filter(o=>o.id!==id));
+      showToast("✓ Order confirmed",true);
+    }catch(e){showToast("Error confirming",false);}
+  }
+
+  async function dismissCustOrder(id){
+    try{
+      await dbDismissCustomerOrder(id);
+      setCustOrders(prev=>prev.filter(o=>o.id!==id));
+    }catch(e){}
+  }
 
   async function loadMenu(){
     setMenuLoading(true);
@@ -389,7 +429,10 @@ function App(){
                 <div style={{fontSize:17,fontWeight:"bold",letterSpacing:2,color:C.gold}}>HAKKA KOPITIAM</div>
                 <div style={{fontSize:10,color:C.dim}}>家的味道 · Taman Gembira, KL</div>
               </div>
-              <div style={{display:"flex",gap:8}}>
+              <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                <button onClick={()=>setShowCustOrders(s=>!s)} style={{position:"relative",background:custOrders.length>0?"#8b0000":C.surfUp,border:`1.5px solid ${custOrders.length>0?C.red:C.bdr}`,color:custOrders.length>0?"#fff":C.dim,padding:"7px 11px",borderRadius:9,cursor:"pointer",fontSize:13,fontWeight:"bold",transition:"all 0.2s",boxShadow:custOrders.length>0?`0 0 10px ${C.red}55`:"none"}}>
+                  🔔{custOrders.length>0&&<span style={{marginLeft:4}}>{custOrders.length}</span>}
+                </button>
                 <button onClick={()=>setView("admin_login")} style={{background:C.orange+"22",border:`1px solid ${C.orange}66`,color:C.orange,padding:"7px 11px",borderRadius:9,cursor:"pointer",fontSize:12}}>⚙️</button>
                 <button onClick={()=>setView("analytics_login")} style={{background:C.purple+"22",border:`1px solid ${C.purple}66`,color:C.purple,padding:"7px 11px",borderRadius:9,cursor:"pointer",fontSize:12}}>📊</button>
               </div>
@@ -403,6 +446,43 @@ function App(){
               ))}
             </div>
           </div>
+
+          {/* CUSTOMER ORDERS PANEL */}
+          {showCustOrders&&(
+            <div style={{background:"#1a0808",borderBottom:`2px solid ${C.red}`,padding:"12px 16px"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                <div style={{fontSize:13,color:C.red,fontWeight:"bold"}}>🔔 Incoming Customer Orders</div>
+                <button onClick={()=>setShowCustOrders(false)} style={{background:"none",border:"none",color:C.dim,cursor:"pointer",fontSize:16}}>✕</button>
+              </div>
+              {custOrders.length===0?(
+                <div style={{fontSize:12,color:C.dim,textAlign:"center",padding:"10px 0"}}>No pending orders</div>
+              ):custOrders.map(o=>(
+                <div key={o.id} style={{background:C.surfUp,border:`1px solid ${C.red}33`,borderRadius:10,padding:"12px 14px",marginBottom:8}}>
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
+                    <div>
+                      <div style={{fontSize:14,fontWeight:"bold",color:C.gold}}>Table {o.table_id}</div>
+                      <div style={{fontSize:10,color:C.dim,marginTop:2}}>{new Date(o.created_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
+                    </div>
+                    <div style={{fontSize:14,fontWeight:"bold",color:C.green}}>RM{(o.total||0).toFixed(2)}</div>
+                  </div>
+                  <div style={{fontSize:11,color:C.dim,lineHeight:1.8,marginBottom:o.note?8:10}}>
+                    {(o.items||[]).map((it,i)=>(
+                      <span key={i}>{it.emoji} {it.name}{it.custom?` (${it.custom})`:""}{it.qty>1?` x${it.qty}`:""}{i<o.items.length-1?" · ":""}</span>
+                    ))}
+                  </div>
+                  {o.note&&(
+                    <div style={{background:"#2a1a08",border:`1px solid ${C.bdrHi}`,borderRadius:7,padding:"6px 10px",fontSize:11,color:C.gold,marginBottom:10}}>
+                      📝 {o.note}
+                    </div>
+                  )}
+                  <div style={{display:"flex",gap:8}}>
+                    <button onClick={()=>confirmCustOrder(o.id)} style={{flex:2,padding:"8px",background:C.green,border:"none",color:"#fff",borderRadius:8,cursor:"pointer",fontSize:12,fontWeight:"bold"}}>✓ Confirm</button>
+                    <button onClick={()=>dismissCustOrder(o.id)} style={{flex:1,padding:"8px",background:"none",border:`1px solid ${C.bdr}`,color:C.dim,borderRadius:8,cursor:"pointer",fontSize:12}}>Dismiss</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {saveErr&&(
             <div style={{background:"#2a0a0a",border:`1px solid ${C.red}`,margin:"8px 16px",borderRadius:10,padding:"10px 14px"}}>
