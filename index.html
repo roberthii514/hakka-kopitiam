@@ -299,8 +299,7 @@ function App(){
         return arr;
       });
 
-      // Set pax to 1 as default (customer didn't specify)
-      // Staff can always adjust later
+      // Use pax from customer order, fallback to 1
       const pax = order.pax || 1;
 
       setGroups(prev=>{
@@ -511,7 +510,7 @@ function App(){
                   <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:8}}>
                     <div>
                       <div style={{fontSize:14,fontWeight:"bold",color:C.gold}}>Table {o.table_id}</div>
-                      <div style={{fontSize:10,color:C.dim,marginTop:2}}>{new Date(o.created_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})}</div>
+                      <div style={{fontSize:10,color:C.dim,marginTop:2}}>{new Date(o.created_at).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"})} · 👤 {o.pax||"?"} pax</div>
                     </div>
                     <div style={{fontSize:14,fontWeight:"bold",color:C.green}}>RM{(o.total||0).toFixed(2)}</div>
                   </div>
