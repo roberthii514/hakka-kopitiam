@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>Hakka Kopitiam — Kitchen Display</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
+body{background:#111;font-family:'Georgia','Times New Roman',serif;overscroll-behavior:none;min-height:100vh;}
+button{font-family:'Georgia','Times New Roman',serif;}
+@keyframes pulse-red{0%,100%{box-shadow:0 0 0 0 rgba(220,50,50,0.5);}50%{box-shadow:0 0 0 8px rgba(220,50,50,0);}}
+@keyframes pulse-orange{0%,100%{box-shadow:0 0 0 0 rgba(220,140,50,0.5);}50%{box-shadow:0 0 0 8px rgba(220,140,50,0);}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}
+@keyframes spin{from{transform:rotate(0deg);}to{transform:rotate(360deg);}}
+.card-new{animation:fadeIn 0.3s ease;}
+.urgent{animation:pulse-red 1.5s ease-in-out infinite;}
+.warning{animation:pulse-orange 2s ease-in-out infinite;}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+// ── SUPABASE ──────────────────────────────────────────────
+const SUPA_URL = "https://qhhlvyluvjzsuycwakan.supabase.co";
+const SUPA_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFoaGx2eWx1dmp6c3V5Y3dha2FuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUzNzM3NzUsImV4cCI6MjA5MDk0OTc3NX0.pPk4PJ2UGwl1K0mUzYMhUbVM-rBP0yX_LDRrq71CGCA";
+const HDR = {"Content-Type":"application/json","apikey":SUPA_KEY,"Authorization":"Bearer "+SUPA_KEY};
+
+async function fetchOrders() {
+  // Fetch pending + confirmed customer orders
+  const r = await fetch(
+    SUPA_URL+"/rest/v1/customer_orders?select=*&status=in.(pending,confirmed)&order=created_at.asc",
+    {headers:HDR}
+  );
+  if(!r.ok) throw new Error("HTTP "+r.status);
+  return r.json();
+}
+
+async function markDone(id) {
+  const r = await fetch(SUPA_URL+"/rest/v1/customer_orders?id=eq."+id, {
+    method:"PATCH",
+    headers:{...HDR,"Prefer":"return=minimal"},
+    body:JSON.stringify({status:"done"}),
+  });
+  if(!r.ok) throw new Error("HTTP "+r.status);
+}
+
+async function markAllDone(ids) {
+  // Patch each one — simple sequential
+  for(const id of ids){
+    await markDone(id);
+  }
+}
+
+// ── HELPERS ───────────────────────────────────────────────
+function elapsed(createdAt) {
+  const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 1000);
+  if(diff < 60) return diff+"s";
+  if(diff < 3600) return Math.floor(diff/60)+"m "+(diff%60)+"s";
+  return Math.floor(diff/3600)+"h "+Math.floor((diff%3600)/60)+"m";
+}
+
+function urgencyLevel(createdAt) {
+  const mins = (Date.now() - new Date(createdAt).getTime()) / 60000;
+  if(mins >= 15) return "urgent";   // 15+ mins — red pulse
+  if(mins >= 8)  return "warning";  // 8–15 mins — orange pulse
+  return "normal";
+}
+
+function urgencyColor(level) {
+  if(level==="urgent")  return "#dc3232";
+  if(level==="warning") return "#e08840";
+  return "#4aaa78";
+}
+
+function timeColor(level) {
+  if(level==="urgent")  return "#ff6b6b";
+  if(level==="warning") return "#ffaa55";
+  return "#aaaaaa";
+}
+
+const now = () => new Date().toLocaleTimeString("en-MY",{hour:"2-digit",minute:"2-digit",second:"2-digit"});
+
+// ── APP ───────────────────────────────────────────────────
+function App() {
+  const [orders,      setOrders]      = useState([]);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
+  const [lastUpdate,  setLastUpdate]  = useState(now());
+  const [ticker,      setTicker]      = useState(0); // force re-render for elapsed times
+  const [completing,  setCompleting]  = useState({}); // id -> true while marking done
+  const [flash,       setFlash]       = useState(null); // brief "Done!" flash
+  const [prevIds,     setPrevIds]     = useState(new Set());
+  const [newIds,      setNewIds]      = useState(new Set());
+  const pollRef = useRef(null);
+  const tickRef = useRef(null);
+
+  useEffect(()=>{
+    load();
+    pollRef.current = setInterval(load, 10000);
+    tickRef.current = setInterval(()=>setTicker(t=>t+1), 1000);
+    return ()=>{
+      clearInterval(pollRef.current);
+      clearInterval(tickRef.current);
+    };
+  },[]);
+
+  async function load() {
+    try {
+      const data = await fetchOrders();
+      const incoming = Array.isArray(data) ? data : [];
+      // Detect genuinely new orders
+      setOrders(prev => {
+        const prevIdSet = new Set(prev.map(o=>o.id));
+        const fresh = new Set(incoming.filter(o=>!prevIdSet.has(o.id)).map(o=>o.id));
+        if(fresh.size > 0) setNewIds(n => new Set([...n,...fresh]));
+        return incoming;
+      });
+      setLastUpdate(now());
+      setError(null);
+    } catch(e) {
+      setError(e.message);
+    }
+    setLoading(false);
+  }
+
+  async function done(order) {
+    setCompleting(p=>({...p,[order.id]:true}));
+    try {
+      await markDone(order.id);
+      setOrders(prev=>prev.filter(o=>o.id!==order.id));
+      setFlash("✓ Table "+order.table_id+" done!");
+      setTimeout(()=>setFlash(null),2000);
+    } catch(e) {
+      setError("Failed to mark done: "+e.message);
+    }
+    setCompleting(p=>{const n={...p};delete n[order.id];return n;});
+    setNewIds(p=>{const n=new Set(p);n.delete(order.id);return n;});
+  }
+
+  async function doneAll() {
+    const ids = orders.map(o=>o.id);
+    for(const id of ids) setCompleting(p=>({...p,[id]:true}));
+    try {
+      await markAllDone(ids);
+      setOrders([]);
+      setFlash("✓ All orders cleared!");
+      setTimeout(()=>setFlash(null),2500);
+    } catch(e) {
+      setError("Error: "+e.message);
+    }
+    setCompleting({});
+    setNewIds(new Set());
+  }
+
+  const pendingCount   = orders.filter(o=>o.status==="pending").length;
+  const confirmedCount = orders.filter(o=>o.status==="confirmed").length;
+  const totalItems     = orders.reduce((s,o)=>s+(o.items||[]).reduce((ss,it)=>ss+(it.qty||1),0),0);
+
+  return (
+    <div style={{minHeight:"100vh",background:"#111",color:"#eee",display:"flex",flexDirection:"column"}}>
+
+      {/* ── HEADER ── */}
+      <div style={{background:"#1a1208",borderBottom:"2px solid #3d2e10",padding:"12px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:16}}>
+          <div style={{fontSize:28}}>🍳</div>
+          <div>
+            <div style={{fontSize:18,fontWeight:"bold",letterSpacing:2,color:"#c9a96e"}}>KITCHEN DISPLAY</div>
+            <div style={{fontSize:10,color:"#8a6a40",letterSpacing:2}}>HAKKA KOPITIAM · 家的味道</div>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div style={{display:"flex",gap:12,alignItems:"center"}}>
+          {[
+            {l:"QUEUE",  v:orders.length,  c:orders.length>0?"#e08840":"#4aaa78"},
+            {l:"PENDING",v:pendingCount,   c:pendingCount>0?"#dc3232":"#555"},
+            {l:"ITEMS",  v:totalItems,     c:"#c9a96e"},
+          ].map(s=>(
+            <div key={s.l} style={{textAlign:"center",background:"#111",border:"1px solid #2a2010",borderRadius:8,padding:"6px 14px"}}>
+              <div style={{fontSize:20,fontWeight:"bold",color:s.c}}>{s.v}</div>
+              <div style={{fontSize:9,color:"#666",letterSpacing:1}}>{s.l}</div>
+            </div>
+          ))}
+
+          {orders.length>0&&(
+            <button onClick={doneAll} style={{padding:"8px 14px",background:"#2a4a2a",border:"1px solid #4aaa78",color:"#4aaa78",borderRadius:9,cursor:"pointer",fontSize:12,fontWeight:"bold"}}>
+              ✓ All Done
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Last update bar */}
+      <div style={{background:"#161310",borderBottom:"1px solid #2a2010",padding:"5px 20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div style={{fontSize:10,color:"#555"}}>
+          Auto-refreshes every 10 seconds
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <div style={{width:6,height:6,borderRadius:"50%",background:error?"#dc3232":"#4aaa78",boxShadow:error?"none":"0 0 6px #4aaa78"}}/>
+          <div style={{fontSize:10,color:error?"#dc3232":"#555"}}>
+            {error ? "Connection error" : "Updated "+lastUpdate}
+          </div>
+        </div>
+      </div>
+
+      {/* ── FLASH MESSAGE ── */}
+      {flash&&(
+        <div style={{position:"fixed",top:60,left:"50%",transform:"translateX(-50%)",zIndex:999,background:"#0d2a1a",border:"2px solid #4aaa78",color:"#4aaa78",padding:"12px 28px",borderRadius:12,fontSize:16,fontWeight:"bold",boxShadow:"0 4px 20px rgba(74,170,120,0.3)"}}>
+          {flash}
+        </div>
+      )}
+
+      {/* ── MAIN CONTENT ── */}
+      <div style={{flex:1,padding:"16px 16px 24px",overflowY:"auto"}}>
+
+        {loading&&orders.length===0&&(
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"60vh",gap:16}}>
+            <div style={{fontSize:32,animation:"spin 1s linear infinite",display:"inline-block"}}>⏳</div>
+            <div style={{color:"#555",fontSize:14}}>Loading orders…</div>
+          </div>
+        )}
+
+        {!loading&&orders.length===0&&(
+          <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"60vh",gap:16}}>
+            <div style={{fontSize:64}}>✅</div>
+            <div style={{fontSize:22,fontWeight:"bold",color:"#4aaa78"}}>All Clear!</div>
+            <div style={{fontSize:14,color:"#555"}}>No pending orders right now</div>
+            <div style={{fontSize:12,color:"#333",marginTop:4}}>Last checked: {lastUpdate}</div>
+          </div>
+        )}
+
+        {error&&(
+          <div style={{background:"#2a0808",border:"1px solid #dc3232",borderRadius:10,padding:"14px 18px",marginBottom:16,maxWidth:500,margin:"0 auto 16px"}}>
+            <div style={{fontSize:13,color:"#dc3232",fontWeight:"bold",marginBottom:4}}>⚠ Could not load orders</div>
+            <div style={{fontSize:11,color:"#aa6666",marginBottom:10}}>{error}</div>
+            <div style={{fontSize:11,color:"#888",lineHeight:1.7}}>Fix: Supabase → Table Editor → customer_orders → Disable RLS</div>
+          </div>
+        )}
+
+        {/* Order cards grid */}
+        {orders.length>0&&(
+          <div style={{
+            display:"grid",
+            gridTemplateColumns:"repeat(auto-fill, minmax(280px, 1fr))",
+            gap:14,
+          }}>
+            {orders.map(order=>{
+              const level   = urgencyLevel(order.created_at);
+              const uColor  = urgencyColor(level);
+              const tColor  = timeColor(level);
+              const isNew   = newIds.has(order.id);
+              const isDoing = completing[order.id];
+              const isPending = order.status==="pending";
+
+              return(
+                <div key={order.id}
+                  className={`card-new ${level==="urgent"?"urgent":level==="warning"?"warning":""}`}
+                  style={{
+                    background: level==="urgent"?"#1e0808":level==="warning"?"#1a1008":"#181410",
+                    border:`2px solid ${uColor}`,
+                    borderRadius:14,
+                    padding:"16px",
+                    display:"flex",
+                    flexDirection:"column",
+                    gap:10,
+                    position:"relative",
+                    transition:"all 0.3s",
+                  }}>
+
+                  {/* NEW badge */}
+                  {isNew&&(
+                    <div style={{position:"absolute",top:-8,left:14,background:"#dc3232",color:"#fff",fontSize:9,fontWeight:"bold",padding:"2px 8px",borderRadius:10,letterSpacing:1}}>
+                      NEW
+                    </div>
+                  )}
+
+                  {/* PENDING badge */}
+                  {isPending&&(
+                    <div style={{position:"absolute",top:-8,right:14,background:"#7a4a00",border:"1px solid #e08840",color:"#e08840",fontSize:9,fontWeight:"bold",padding:"2px 8px",borderRadius:10,letterSpacing:1}}>
+                      AWAITING CONFIRM
+                    </div>
+                  )}
+
+                  {/* Header row */}
+                  <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+                    <div>
+                      <div style={{fontSize:22,fontWeight:"bold",color:"#c9a96e",letterSpacing:1}}>
+                        Table {order.table_id}
+                      </div>
+                      <div style={{fontSize:11,color:"#8a7a60",marginTop:2}}>
+                        👤 {order.pax||1} pax · {(order.items||[]).reduce((s,it)=>s+(it.qty||1),0)} items
+                      </div>
+                    </div>
+                    {/* Elapsed timer */}
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:20,fontWeight:"bold",color:tColor,fontVariantNumeric:"tabular-nums"}}>
+                        {elapsed(order.created_at)}
+                      </div>
+                      <div style={{fontSize:9,color:"#555",marginTop:1}}>
+                        {new Date(order.created_at).toLocaleTimeString("en-MY",{hour:"2-digit",minute:"2-digit"})}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div style={{height:1,background:uColor+"44"}}/>
+
+                  {/* Items list */}
+                  <div style={{display:"flex",flexDirection:"column",gap:7}}>
+                    {(order.items||[]).map((it,i)=>(
+                      <div key={i} style={{display:"flex",alignItems:"flex-start",gap:10}}>
+                        {/* Qty bubble */}
+                        <div style={{
+                          minWidth:28,height:28,borderRadius:"50%",
+                          background: it.qty>1?"#2a1a08":"#1e1810",
+                          border:`1px solid ${it.qty>1?"#c9a96e":"#3d3020"}`,
+                          display:"flex",alignItems:"center",justifyContent:"center",
+                          fontSize:12,fontWeight:"bold",color:it.qty>1?"#c9a96e":"#8a7a60",
+                          flexShrink:0,
+                        }}>
+                          {it.qty||1}
+                        </div>
+                        <div style={{flex:1}}>
+                          <div style={{fontSize:14,color:"#ede0cc",lineHeight:1.3}}>
+                            {it.emoji} {it.name}
+                          </div>
+                          {it.custom&&(
+                            <div style={{fontSize:11,color:"#c9a96e",marginTop:2}}>
+                              ↳ {it.custom}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Special note */}
+                  {order.note&&(
+                    <div style={{background:"#2a1a05",border:"1px solid #5a3a10",borderRadius:8,padding:"8px 12px",display:"flex",alignItems:"flex-start",gap:8}}>
+                      <span style={{fontSize:14,flexShrink:0}}>📝</span>
+                      <span style={{fontSize:12,color:"#e0b060",lineHeight:1.5}}>{order.note}</span>
+                    </div>
+                  )}
+
+                  {/* Urgency message */}
+                  {level==="urgent"&&(
+                    <div style={{background:"#3a0808",borderRadius:7,padding:"6px 10px",fontSize:11,color:"#ff6b6b",textAlign:"center",fontWeight:"bold"}}>
+                      ⚠ URGENT — Over 15 minutes!
+                    </div>
+                  )}
+                  {level==="warning"&&(
+                    <div style={{background:"#2a1a08",borderRadius:7,padding:"6px 10px",fontSize:11,color:"#ffaa55",textAlign:"center"}}>
+                      ⏰ Over 8 minutes — please prioritise
+                    </div>
+                  )}
+
+                  {/* Done button */}
+                  <button
+                    onClick={()=>done(order)}
+                    disabled={isDoing}
+                    style={{
+                      width:"100%",
+                      padding:"13px",
+                      background: isDoing ? "#1a2a1a" : "#2a4a2a",
+                      border:`1.5px solid ${isDoing?"#2a4a2a":"#4aaa78"}`,
+                      color: isDoing ? "#4a7a4a" : "#4aaa78",
+                      borderRadius:10,
+                      cursor: isDoing ? "not-allowed" : "pointer",
+                      fontSize:15,
+                      fontWeight:"bold",
+                      letterSpacing:1,
+                      transition:"all 0.15s",
+                    }}>
+                    {isDoing ? "Marking done…" : "✓  ORDER READY"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── FOOTER ── */}
+      <div style={{background:"#0e0c09",borderTop:"1px solid #2a2010",padding:"8px 20px",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+        <div style={{fontSize:10,color:"#333"}}>Hakka Kopitiam KDS · 家的味道</div>
+        <div style={{display:"flex",gap:16,fontSize:10,color:"#444"}}>
+          {[
+            {dot:"#4aaa78",l:"Fresh (0–8 min)"},
+            {dot:"#e08840",l:"Waiting (8–15 min)"},
+            {dot:"#dc3232",l:"Urgent (15+ min)"},
+          ].map(x=>(
+            <div key={x.l} style={{display:"flex",alignItems:"center",gap:5}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:x.dot}}/>
+              {x.l}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
