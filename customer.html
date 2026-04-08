@@ -159,6 +159,7 @@ function App(){
   const [cats,  setCats]  = useState(Object.keys(DEFAULT_MENU));
   const [cat,   setCat]   = useState(Object.keys(DEFAULT_MENU)[0]);
   const [cart,  setCart]  = useState([]); // [{id, item, sel, qty}]
+  const [sentCart, setSentCart] = useState([]); // items already sent
   const [view,  setView]  = useState("pax"); // pax | menu | cart | confirm | done
   const [note,  setNote]  = useState("");
   const [pax,   setPax]   = useState(1);
@@ -220,6 +221,8 @@ function App(){
     const total=cartTotal(cart);
     try{
       await submitOrder({table_id:tableId,items,total:+total.toFixed(2),note:note.trim()||null,status:"pending",pax});
+      setSentCart(prev=>[...prev,...cart]); // mark current cart as sent
+      setCart([]); // clear cart for next round
       setView("done");
     }catch(e){
       setError("Could not send order. Please ask a staff member.");
@@ -235,11 +238,11 @@ function App(){
   return(
     <div style={{minHeight:"100dvh",background:K.bg,color:K.txt,fontFamily:"Georgia,'Times New Roman',serif",display:"flex",flexDirection:"column",maxWidth:480,margin:"0 auto"}}>
 
-      {view==="pax"  && <PaxSelectView tableId={tableId} onConfirm={(n)=>{setPax(n);setView("menu");}}/> }
-      {view==="done" && <DoneView tableId={tableId} onNewOrder={()=>{setCart([]);setNote("");setView("pax");}}/>}
+      {view==="pax"  && <PaxSelectView tableId={tableId} onConfirm={(n)=>{setPax(n);setSentCart([]);setCart([]);setView("menu");}}/> }
+      {view==="done" && <DoneView tableId={tableId} onNewOrder={()=>{setCart([]);setNote("");setView("menu");}}/>}
       {view==="confirm" && (
         <ConfirmView cart={cart} total={total} tableId={tableId} note={note} setNote={setNote}
-          sending={sending} error={error}
+          sending={sending} error={error} isReorder={sentCart.length>0}
           onSend={sendOrder} onBack={()=>setView("cart")}/>
       )}
       {view==="cart" && (
@@ -458,13 +461,13 @@ function CartView({cart,total,tableId,onAdd,onRemove,onBack,onCheckout}){
 }
 
 // ── CONFIRM VIEW ──────────────────────────────────────────
-function ConfirmView({cart,total,tableId,note,setNote,sending,error,onSend,onBack}){
+function ConfirmView({cart,total,tableId,note,setNote,sending,error,onSend,onBack,isReorder}){
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
       <div style={{background:K.brown,padding:"16px 18px",display:"flex",alignItems:"center",gap:12}}>
         <button onClick={onBack} style={{background:"rgba(255,255,255,0.2)",border:"none",color:"#fff",width:36,height:36,borderRadius:"50%",cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center"}}>←</button>
         <div>
-          <div style={{fontWeight:"bold",color:"#fff",fontSize:16}}>Confirm Order</div>
+          <div style={{fontWeight:"bold",color:"#fff",fontSize:16}}>{isReorder?"Add More Items":"Confirm Order"}</div>
           <div style={{fontSize:11,color:"#d4b896"}}>Table {tableId}</div>
         </div>
       </div>
@@ -513,6 +516,11 @@ function ConfirmView({cart,total,tableId,note,setNote,sending,error,onSend,onBac
           </div>
         )}
 
+        {isReorder&&(
+          <div style={{background:"#f0fff4",border:"1px solid #4aaa78",borderRadius:12,padding:"12px 14px",fontSize:12,color:"#2d7a4a",lineHeight:1.8,marginBottom:8}}>
+            ➕ These items will be added to your existing order at Table {tableId}.
+          </div>
+        )}
         <div style={{background:"#fffbf0",border:`1px solid ${K.bdr}`,borderRadius:12,padding:"12px 14px",fontSize:12,color:K.dim,lineHeight:1.8,marginBottom:8}}>
           ℹ️ Your order will be sent to our staff. Payment is collected at the end of your visit.
         </div>
@@ -520,7 +528,7 @@ function ConfirmView({cart,total,tableId,note,setNote,sending,error,onSend,onBac
 
       <div style={{padding:"14px 18px 32px",background:K.card,borderTop:`1px solid ${K.bdr}`}}>
         <button onClick={onSend} disabled={sending} style={{width:"100%",padding:"16px",background:sending?"#c4a882":K.green,border:"none",color:"#fff",borderRadius:14,cursor:sending?"not-allowed":"pointer",fontSize:15,fontWeight:"bold",boxShadow:sending?"none":"0 4px 16px rgba(45,122,74,0.3)"}}>
-          {sending?"Sending order…":"✓ Send Order to Kitchen"}
+          {sending?"Sending order…":isReorder?"✓ Add Items to Order":"✓ Send Order to Kitchen"}
         </button>
       </div>
     </div>
