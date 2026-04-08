@@ -87,6 +87,22 @@ async function dbToggleSoldOut(id, sold_out) {
   const r = await fetch(SUPA_URL+"/rest/v1/menu_items?id=eq."+id,{method:"PATCH",headers:{...HDR,"Prefer":"return=minimal"},body:JSON.stringify({sold_out})});
   if(!r.ok) throw new Error("HTTP "+r.status+": "+await r.text());
 }
+async function dbSendToKitchen(tableIds, pax, items, total) {
+  const r = await fetch(SUPA_URL+"/rest/v1/customer_orders",{
+    method:"POST",
+    headers:{...HDR,"Prefer":"return=minimal"},
+    body:JSON.stringify({
+      table_id: tableIds.join(", "),
+      pax: pax,
+      items: items,
+      total: +total.toFixed(2),
+      status: "confirmed",
+      note: null,
+    }),
+  });
+  if(!r.ok) throw new Error("HTTP "+r.status+": "+await r.text());
+}
+
 async function dbFetchCustomerOrders() {
   const r = await fetch(SUPA_URL+"/rest/v1/customer_orders?select=*&status=eq.pending&order=created_at.asc",{headers:HDR});
   if(!r.ok) return [];
@@ -459,6 +475,26 @@ function App(){
       return{...p,[activeGid]:{...gd,ois:gd.ois.map(oi=>oi.id===instId?{...oi,sel:{...oi.sel,[vKey]:oIdx}}:oi)}};
     });
   }
+  async function sendToKitchen(){
+    const gd = gdata_(activeGid);
+    const sub = sumOrder(gd.ois||[]);
+    const items = (gd.ois||[]).map(oi=>({
+      name: oi.item.name,
+      zh: oi.item.zh,
+      emoji: oi.item.emoji,
+      price: iPrice(oi.item, oi.sel),
+      qty: 1,
+      custom: iLabel(oi.item, oi.sel)||null,
+      cat: ALL_CATS.find(c=>MENU[c].some(m=>m.id===oi.item.id))||"",
+    }));
+    try{
+      await dbSendToKitchen(gdata_(activeGid).tableIds, gdata_(activeGid).pax, items, sub);
+      showToast("✓ Order sent to kitchen",true);
+    }catch(e){
+      showToast("⚠ Could not send to kitchen",false);
+    }
+  }
+
   async function closeTable(){
     const gd=gdata_(activeGid);
     const sub=sumOrder(gd.ois);
@@ -641,7 +677,7 @@ function App(){
       )}
 
       {view==="pax"&&<PaxView groupTables={agTbls} onConfirm={confirmPax} onBack={()=>{setActiveGid(null);setView("floor");}}/>}
-      {view==="order"&&agd&&menuCat&&<OrderView MENU={MENU} ALL_CATS={ALL_CATS} groupTables={agTbls} gd={agd} cat={menuCat} setCat={setMenuCat} addItem={addItem} removeItem={removeItem} updateVar={updateVar} onBill={()=>setView("total")} onBack={()=>setView("floor")}/>}
+      {view==="order"&&agd&&menuCat&&<OrderView MENU={MENU} ALL_CATS={ALL_CATS} groupTables={agTbls} gd={agd} cat={menuCat} setCat={setMenuCat} addItem={addItem} removeItem={removeItem} updateVar={updateVar} onBill={()=>setView("total")} onBack={()=>setView("floor")} onSendKitchen={sendToKitchen}/>}
       {view==="total"&&agd&&<BillView groupTables={agTbls} gd={agd} saving={saving} onBack={()=>setView("order")} onClose={closeTable}/>}
       {view==="analytics_login"&&<GateView title="📊 Analytics" icon="🔒" onSuccess={()=>setView("analytics")} onBack={()=>setView("floor")}/>}
       {view==="analytics"&&<AnalyticsView onBack={()=>setView("floor")}/>}
@@ -719,7 +755,7 @@ function PaxView({groupTables,onConfirm,onBack}){
 }
 
 // ── ORDER ─────────────────────────────────────────────────
-function OrderView({MENU,ALL_CATS,groupTables,gd,cat,setCat,addItem,removeItem,updateVar,onBill,onBack}){
+function OrderView({MENU,ALL_CATS,groupTables,gd,cat,setCat,addItem,removeItem,updateVar,onBill,onBack,onSendKitchen}){
   const ois=gd.ois||[];
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
@@ -732,10 +768,16 @@ function OrderView({MENU,ALL_CATS,groupTables,gd,cat,setCat,addItem,removeItem,u
               <div style={{fontSize:11,color:C.dim}}>👤 {gd.pax} guests</div>
             </div>
           </div>
-          <button onClick={onBill} style={{background:C.gold,border:"none",color:"#0d0d0d",padding:"10px 16px",borderRadius:11,cursor:"pointer",fontWeight:"bold",fontSize:13,display:"flex",flexDirection:"column",alignItems:"center",lineHeight:1.3}}>
-            <span style={{fontSize:10,letterSpacing:1}}>VIEW BILL</span>
-            <span style={{fontSize:14}}>{ois.length>0?`${ois.length} item${ois.length>1?"s":""}`:"→"}</span>
-          </button>
+          <div style={{display:"flex",gap:8,flexShrink:0}}>
+            <button onClick={onSendKitchen} disabled={ois.length===0} style={{padding:"10px 12px",borderRadius:11,border:`1.5px solid ${ois.length>0?C.red:C.bdr}`,background:ois.length>0?"#2a0808":"none",color:ois.length>0?C.red:C.faint,cursor:ois.length>0?"pointer":"not-allowed",display:"flex",flexDirection:"column",alignItems:"center",lineHeight:1.3}}>
+              <span style={{fontSize:18}}>🍳</span>
+              <span style={{fontSize:9,letterSpacing:0.5,marginTop:1}}>KITCHEN</span>
+            </button>
+            <button onClick={onBill} style={{background:C.gold,border:"none",color:"#0d0d0d",padding:"10px 16px",borderRadius:11,cursor:"pointer",fontWeight:"bold",fontSize:13,display:"flex",flexDirection:"column",alignItems:"center",lineHeight:1.3}}>
+              <span style={{fontSize:10,letterSpacing:1}}>VIEW BILL</span>
+              <span style={{fontSize:14}}>{ois.length>0?`${ois.length} item${ois.length>1?"s":""}`:"→"}</span>
+            </button>
+          </div>
         </div>
         <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
           {ALL_CATS.map(c=>(
