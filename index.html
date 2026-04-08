@@ -17,33 +17,6 @@ input,button,select,textarea{font-family:Georgia,'Times New Roman',serif;}
 ::-webkit-scrollbar{width:4px;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:#2c2519;border-radius:2px;}
-
-@media print{
-  /* Hide everything except receipt */
-  body > *{display:none !important;}
-  #receipt-print{display:block !important;}
-  /* Thermal paper — 58mm */
-  #receipt-print{
-    position:fixed;
-    top:0;left:0;
-    width:220px;
-    font-family:'Courier New',Courier,monospace;
-    font-size:11px;
-    line-height:1.7;
-    color:#000;
-    background:#fff;
-    padding:4px 2px;
-  }
-  #receipt-print *{
-    color:#000 !important;
-    background:#fff !important;
-    box-shadow:none !important;
-    border-radius:0 !important;
-    font-family:'Courier New',Courier,monospace !important;
-  }
-  /* Hide split bill section when printing */
-  #receipt-print .split-bill{display:none;}
-}
 @keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:0.85;transform:scale(1.06);}}
 .bell-pulse{animation:pulse 1.2s ease-in-out infinite;}
 </style>
@@ -802,56 +775,6 @@ function OrderView({MENU,ALL_CATS,groupTables,gd,cat,setCat,addItem,removeItem,u
 // ── BILL ──────────────────────────────────────────────────
 function BillView({groupTables,gd,saving,onBack,onClose}){
   const ois=gd.ois||[],sub=sumOrder(ois);
-
-  // Build plain text receipt for thermal printer
-  function buildThermalReceipt(){
-    const line  = (l,r,w=28)=>{ if(!r) return l.substring(0,w); const gap=w-l.length-String(r).length; return l+(gap>0?" ".repeat(gap):"")+r; };
-    const div   = "-".repeat(28);
-    const cdiv  = "=".repeat(28);
-    const rows  = [];
-    rows.push("     HAKKA KOPITIAM");
-    rows.push("      家的味道");
-    rows.push(" Taman Gembira, KL");
-    rows.push(div);
-    rows.push(line("Table: "+groupTables.join("+"),"Pax: "+gd.pax));
-    rows.push(new Date().toLocaleDateString("en-MY",{day:"numeric",month:"short",year:"numeric"}));
-    rows.push(new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}));
-    rows.push(div);
-    const{simple,complex}=billGroups(ois);
-    simple.forEach(({oi,qty})=>{
-      const p=iPrice(oi.item,oi.sel)*qty;
-      rows.push(line(oi.item.emoji+" "+oi.item.name.substring(0,16)+" x"+qty,"RM"+p.toFixed(2)));
-    });
-    complex.forEach(oi=>{
-      const p=iPrice(oi.item,oi.sel);
-      rows.push(line(oi.item.emoji+" "+oi.item.name.substring(0,18),"RM"+p.toFixed(2)));
-      const lbl=iLabel(oi.item,oi.sel);
-      if(lbl) rows.push("  > "+lbl.substring(0,24));
-    });
-    rows.push(cdiv);
-    rows.push(line("TOTAL","RM"+sub.toFixed(2)));
-    rows.push(cdiv);
-    rows.push("");
-    rows.push("  All prices inclusive");
-    rows.push("  Thank you 谢谢光临 ♥");
-    rows.push("");
-    rows.push("");
-    return rows.join("
-");
-  }
-
-  function handlePrint(){
-    // Inject plain text into receipt-print div temporarily
-    const el = document.getElementById("receipt-print");
-    if(el){
-      const original = el.innerHTML;
-      el.innerHTML = "<pre style='font-family:Courier New,monospace;font-size:11px;line-height:1.7;white-space:pre;'>"+buildThermalReceipt()+"</pre>";
-      window.print();
-      el.innerHTML = original;
-    } else {
-      window.print();
-    }
-  }
   const{simple,complex}=billGroups(ois);
   return(
     <div style={{flex:1,display:"flex",flexDirection:"column",minHeight:0}}>
@@ -863,7 +786,7 @@ function BillView({groupTables,gd,saving,onBack,onClose}){
         </div>
       </div>
       <div style={{flex:1,overflowY:"auto",padding:"20px 18px"}}>
-        <div id="receipt-print" style={{background:C.cream,borderRadius:4,padding:"26px 20px",color:"#1a1610",fontFamily:"'Courier New',monospace",boxShadow:"0 10px 40px rgba(0,0,0,0.7)"}}>
+        <div style={{background:C.cream,borderRadius:4,padding:"26px 20px",color:"#1a1610",fontFamily:"'Courier New',monospace",boxShadow:"0 10px 40px rgba(0,0,0,0.7)"}}>
           <div style={{textAlign:"center",marginBottom:14}}>
             <div style={{fontSize:22}}>☕</div>
             <div style={{fontSize:15,fontWeight:"bold",letterSpacing:2,marginTop:4}}>HAKKA KOPITIAM</div>
@@ -906,11 +829,8 @@ function BillView({groupTables,gd,saving,onBack,onClose}){
           <div style={{textAlign:"center",fontSize:10,color:"#9a8a70",lineHeight:2}}>All prices are inclusive<br/>Thank you · 谢谢光临 ♥</div>
         </div>
       </div>
-      <div className="no-print" style={{padding:"14px 18px 32px",background:C.surf,borderTop:`1px solid ${C.bdr}`,display:"flex",gap:8,flexShrink:0}}>
+      <div style={{padding:"14px 18px 32px",background:C.surf,borderTop:`1px solid ${C.bdr}`,display:"flex",gap:10,flexShrink:0}}>
         <button onClick={onBack} style={{flex:1,padding:"15px",background:"none",border:`1px solid ${C.bdr}`,color:C.dim,borderRadius:13,cursor:"pointer",fontSize:14}}>← Edit</button>
-        <button onClick={handlePrint} style={{flex:1,padding:"15px",background:"#1a2a3a",border:`1px solid ${C.blue}`,color:C.blue,borderRadius:13,cursor:"pointer",fontSize:14,fontWeight:"bold"}}>
-          🖨️ Print
-        </button>
         <button onClick={onClose} disabled={sub===0||saving} style={{flex:2,padding:"15px",background:sub>0&&!saving?C.green:C.bdr,border:"none",color:sub>0&&!saving?"#fff":C.faint,borderRadius:13,cursor:sub>0&&!saving?"pointer":"not-allowed",fontSize:14,fontWeight:"bold"}}>
           {saving?"Saving…":"✓ PAID · CLEAR TABLE"}
         </button>
